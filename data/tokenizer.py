@@ -12,7 +12,6 @@ SAVE_PATH = Path(__file__).parent / "yapuny_tokenizer.json"
 
 
 def train_tokenizer(corpus_path: Path = CORPUS_PATH, vocab_size: int = VOCAB_SIZE) -> Tokenizer:
-    """Train a byte-level BPE tokenizer on the given corpus file."""
     tokenizer = Tokenizer(BPE(unk_token="<unk>"))
     tokenizer.pre_tokenizer = ByteLevel(add_prefix_space=False)
     tokenizer.decoder = ByteLevelDecoder()
