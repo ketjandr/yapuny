@@ -1,0 +1,5 @@
+This is a placeholder corpus for training Yapuny's tokenizer.
+Replace this file with your real text -- personal notes, code-switched
+Indonesian-English text, or any dataset you want Yapuny to learn from.
+The bigger and more representative this file is, the better the tokenizer's
+vocabulary will match the text your model will actually see.
