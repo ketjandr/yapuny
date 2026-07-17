@@ -129,8 +129,7 @@ class GPT(nn.Module):
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
-        """Naive autoregressive generation -- no KV cache yet.
-        This is the baseline you'll optimize in the inference engine phase."""
+        # No KV cache, baseline
         for _ in range(max_new_tokens):
             idx_cond = idx[:, -self.config.block_size:]
             logits, _ = self(idx_cond)
