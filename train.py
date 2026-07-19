@@ -31,7 +31,7 @@ def get_batch(split: str):
 
 @torch.no_grad()
 def estimate_loss(model):
-    """Average loss over a few batches for both splits -- less noisy than one batch."""
+    # Average loss from multiple batches
     model.eval()
     out = {}
     for split in ["train", "val"]:
