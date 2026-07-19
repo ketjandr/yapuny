@@ -1,0 +1,23 @@
+[project]
+name = "yapuny"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "numpy",
+    "tokenizers",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+# E/F = pyflakes + pycodestyle basics
+# I   = isort (import sorting)
+# W   = warnings
+# UP  = pyupgrade (modern Python idioms)
+
+[tool.ruff.format]
+quote-style = "double"

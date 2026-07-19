@@ -1,8 +1,10 @@
 from pathlib import Path
+
 import numpy as np
 import torch
 
-from model.gpt import GPT, GPTConfig
+from model.config import GPTConfig
+from model.gpt import GPT
 
 # ---- config (hardcode for now, move to configs/*.yaml later) ----
 DATA_DIR = Path(__file__).parent / "data"

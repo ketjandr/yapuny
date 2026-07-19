@@ -1,13 +1,14 @@
 from pathlib import Path
+
 from tokenizers import Tokenizer
-from tokenizers.models import BPE
-from tokenizers.trainers import BpeTrainer
-from tokenizers.pre_tokenizers import ByteLevel
 from tokenizers.decoders import ByteLevel as ByteLevelDecoder
+from tokenizers.models import BPE
+from tokenizers.pre_tokenizers import ByteLevel
+from tokenizers.trainers import BpeTrainer
 
 VOCAB_SIZE = 8000
 SPECIAL_TOKENS = ["<pad>", "<unk>", "<bos>", "<eos>"]
-CORPUS_PATH = Path(__file__).parent / "raw" / "corpus.txt" 
+CORPUS_PATH = Path(__file__).parent / "raw" / "corpus.txt"
 SAVE_PATH = Path(__file__).parent / "yapuny_tokenizer.json"
 
 
@@ -45,7 +46,6 @@ def decode(tokenizer: Tokenizer, ids: list[int]) -> str:
 
 
 def round_trip_test(tokenizer: Tokenizer, text: str) -> bool:
-    """Sanity check: encode then decode should return (close to) the original."""
     ids = encode(tokenizer, text)
     decoded = decode(tokenizer, ids)
     print(f"Original : {text!r}")

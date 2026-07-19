@@ -1,7 +1,8 @@
 from pathlib import Path
-import numpy as np
 
-from tokenizer import load_tokenizer, encode, SAVE_PATH as TOKENIZER_PATH
+import numpy as np
+from tokenizer import SAVE_PATH as TOKENIZER_PATH
+from tokenizer import encode, load_tokenizer
 
 CORPUS_PATH = Path(__file__).parent / "raw" / "corpus.txt"
 OUT_DIR = Path(__file__).parent
@@ -21,15 +22,14 @@ def prepare(
     if not corpus_path.exists():
         raise FileNotFoundError(f"No corpus found at {corpus_path}.")
 
-    print(f"Loading tokenizer from {tokenizer_path}")
+    # Load tokenizer
     tok = load_tokenizer(tokenizer_path)
 
-    print(f"Reading corpus from {corpus_path}")
+    # Load corpus file
     text = corpus_path.read_text(encoding="utf-8")
 
-    print("Tokenizing (this can take a while for large corpora)...")
+    # encode
     ids = encode(tok, text)
-    print(f"Total tokens: {len(ids):,}")
 
     # split into train/val by position
     split_idx = int(len(ids) * (1 - val_fraction))
@@ -37,7 +37,8 @@ def prepare(
     val_ids = ids[split_idx:]
 
     vocab_size = tok.get_vocab_size()
-    # uint16 covers vocab sizes up to 65536 -- fine for our 8k vocab.
+
+    # uint16 covers vocab sizes up to 65536 -- fine for 8k vocab.
     # switch to uint32 if you ever grow vocab_size past that.
     dtype = np.uint16 if vocab_size < 65536 else np.uint32
 
@@ -49,7 +50,3 @@ def prepare(
 
     print(f"Train: {len(train_arr):,} tokens -> {TRAIN_BIN}")
     print(f"Val:   {len(val_arr):,} tokens -> {VAL_BIN}")
-
-
-if __name__ == "__main__":
-    prepare()
