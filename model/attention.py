@@ -14,13 +14,13 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.head_dim = config.n_embd // config.n_head
 
-        # combined qkv projection -- one matmul instead of three
+        # combined QKV projection, 1 matmul instead of 3
         self.qkv_proj = nn.Linear(config.n_embd, 3 * config.n_embd)
         self.out_proj = nn.Linear(config.n_embd, config.n_embd)
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
 
-        # causal mask: prevents attending to future tokens
+        # apply causal mask
         mask = torch.tril(torch.ones(config.block_size, config.block_size))
         self.register_buffer("mask", mask.view(1, 1, config.block_size, config.block_size))
 

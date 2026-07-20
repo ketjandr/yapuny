@@ -50,3 +50,6 @@ def prepare(
 
     print(f"Train: {len(train_arr):,} tokens -> {TRAIN_BIN}")
     print(f"Val:   {len(val_arr):,} tokens -> {VAL_BIN}")
+
+if __name__ == "__main__":
+    prepare()
