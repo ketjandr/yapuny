@@ -6,8 +6,6 @@ from model.mlp import MLP
 
 
 class Block(nn.Module):
-    """One transformer block: attention + MLP, each with pre-norm + residual."""
-
     def __init__(self, config: GPTConfig):
         super().__init__()
         self.ln1 = nn.LayerNorm(config.n_embd)
