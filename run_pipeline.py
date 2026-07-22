@@ -13,7 +13,10 @@ import sys
 
 def step_tokenize():
     from data.tokenizer import (
-        train_tokenizer, save_tokenizer, round_trip_test, CORPUS_PATH,
+        CORPUS_PATH,
+        round_trip_test,
+        save_tokenizer,
+        train_tokenizer,
     )
 
     if not CORPUS_PATH.exists():
