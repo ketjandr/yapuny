@@ -32,14 +32,15 @@ class GPT(nn.Module):
         B, T = idx.shape
         assert T <= self.config.block_size, "sequence longer than block_size"
 
+        # initialize token embeddings and position embeddings
         pos = torch.arange(0, T, device=idx.device)
-        x = self.token_emb(idx) + self.pos_emb(pos)  # (B, T, C)
+        x = self.token_emb(idx) + self.pos_emb(pos) # (B, T, C)
         x = self.dropout(x)
 
         for block in self.blocks:
-            x = block(x)
+            block(x)
         x = self.ln_f(x)
-        logits = self.lm_head(x)  # (B, T, vocab_size)
+        logits = self.lm_head(x) # (B, T, vocab_size)
 
         loss = None
         if targets is not None:
