@@ -3,8 +3,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from model.config import GPTConfig
-from model.gpt import GPT
+from model import GPT, GPTConfig
 
 # ---- config (hardcode for now, move to configs/*.yaml later) ----
 DATA_DIR = Path(__file__).parent / "data"
@@ -25,7 +24,7 @@ def get_batch(split: str):
     path = DATA_DIR / ("train.bin" if split == "train" else "val.bin")
     data = np.memmap(path, dtype=np.uint16, mode="r")
 
-    ix = torch.randint(len(data) - BLOCK_SIZE, (BATCH_SIZE,))
+    ix = torch.randint(len(data) - BLOCK_SIZE, (BATCH_SIZE,)) # randomly sample starting token pos
     x = torch.stack([torch.from_numpy(data[i:i + BLOCK_SIZE].astype(np.int64)) for i in ix])
     y = torch.stack([torch.from_numpy(data[i + 1:i + 1 + BLOCK_SIZE].astype(np.int64)) for i in ix])
     return x.to(device), y.to(device)

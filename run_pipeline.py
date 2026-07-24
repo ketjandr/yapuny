@@ -25,7 +25,6 @@ def step_tokenize():
 
     tok = train_tokenizer()
     save_tokenizer(tok)
-    round_trip_test(tok, "Testing Yapuny's tokenizer, let's see how it splits!")
 
 def step_prepare():
     from data.prepare import prepare

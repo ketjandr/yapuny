@@ -1,8 +1,8 @@
 from pathlib import Path
 
 import numpy as np
-from tokenizer import SAVE_PATH as TOKENIZER_PATH
-from tokenizer import encode, load_tokenizer
+from data.tokenizer import SAVE_PATH as TOKENIZER_PATH
+from data.tokenizer import encode, load_tokenizer
 
 CORPUS_PATH = Path(__file__).parent / "raw" / "corpus.txt"
 OUT_DIR = Path(__file__).parent
