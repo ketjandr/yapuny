@@ -38,7 +38,7 @@ class GPT(nn.Module):
         x = self.dropout(x)
 
         for block in self.blocks:
-            block(x)
+            x = block(x)
         x = self.ln_f(x)
         logits = self.lm_head(x) # (B, T, vocab_size)
 
