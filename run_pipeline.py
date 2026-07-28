@@ -31,8 +31,8 @@ def step_prepare():
     prepare()
 
 def step_train():
-    from train import main
-    main()
+    from train import train
+    train()
 
 STEPS = {
     "tokenize": step_tokenize,

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+
 from data.tokenizer import SAVE_PATH as TOKENIZER_PATH
 from data.tokenizer import encode, load_tokenizer
 

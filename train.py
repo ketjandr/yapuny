@@ -18,7 +18,6 @@ CHECKPOINT_PATH = Path(__file__).parent / "checkpoints" / "yapuny.pt"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
-
 def get_batch(split: str):
     """Load a random batch of (input, target) sequences from the memmapped .bin file."""
     path = DATA_DIR / ("train.bin" if split == "train" else "val.bin")
@@ -46,7 +45,7 @@ def estimate_loss(model):
     return out
 
 
-def main():
+def train():
     config = GPTConfig(block_size=BLOCK_SIZE)
     model = GPT(config).to(device)
     print(f"Model params: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M")
@@ -68,7 +67,3 @@ def main():
     CHECKPOINT_PATH.parent.mkdir(exist_ok=True)
     torch.save({"model": model.state_dict(), "config": config}, CHECKPOINT_PATH)
     print(f"Saved checkpoint to {CHECKPOINT_PATH}")
-
-
-if __name__ == "__main__":
-    main()
