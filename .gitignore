@@ -5,6 +5,7 @@ dist/
 *.egg-info/
 .pytest_cache/
 # Model checkpoints
+checkpoints/
 
 # Tokenized data binaries
 data/*.bin
