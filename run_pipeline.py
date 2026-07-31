@@ -14,7 +14,6 @@ import sys
 def step_tokenize():
     from data.tokenizer import (
         CORPUS_PATH,
-        round_trip_test,
         save_tokenizer,
         train_tokenizer,
     )
