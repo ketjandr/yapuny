@@ -11,7 +11,7 @@ import argparse
 
 import torch
 
-from data.tokenizer import load_tokenizer
+from data.tokenizer import decode, encode, load_tokenizer
 from model.gpt import GPT
 
 CHECKPOINT_PATH = "checkpoints/yapuny.pt"
@@ -41,7 +41,7 @@ def generate():
     tok = load_tokenizer()
 
     # Encode prompt
-    prompt_ids = tok.encode(args.prompt).ids
+    prompt_ids = encode(tok, args.prompt)
     idx = torch.tensor([prompt_ids], dtype=torch.long, device=device)
 
     # Generate
@@ -52,7 +52,7 @@ def generate():
 
     # Decode and print
     generated_ids = output[0].tolist()
-    text = tok.decode(generated_ids)
+    text = decode(tok, generated_ids)
     print(text)
 
 
