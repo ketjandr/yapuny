@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 from model.config import GPTConfig
+from model.types import CacheType
 
 
 class CausalSelfAttention(nn.Module):
@@ -24,7 +25,7 @@ class CausalSelfAttention(nn.Module):
         mask = torch.tril(torch.ones(config.block_size, config.block_size))
         self.register_buffer("mask", mask.view(1, 1, config.block_size, config.block_size))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cache: CacheType = None) -> tuple[torch.Tensor, CacheType]:
         B, T, C = x.shape  # batch, sequence length, embedding dim
 
         qkv = self.qkv_proj(x) # (B, T, 3*C)
@@ -35,13 +36,25 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
+        # concat k, v into cached_k, cached_v
+        if cache is not None:
+            cached_k, cached_v = cache
+            k = torch.cat([cached_k, k], dim=2)
+            v = torch.cat([cached_v, v], dim=2)
+
         # scaled dot-product attention
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(self.head_dim)) # (B, n_head, T, T)
-        att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
+
+        # masking only happens when T > 1 (e.g. when cache is None)
+        if T > 1:
+            att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
+
         att = F.softmax(att, dim=-1)
         att = self.attn_dropout(att)
 
         out = att @ v # (B, n_head, T, head_dim)
-        out = out.transpose(1, 2).contiguous().view(B, T, C) # merge heads back
+        out = out.transpose(1, 2).contiguous().view(B, T, C) # merge heads back (B, T, C)
         out = self.resid_dropout(self.out_proj(out))
-        return out
+
+        # return the out matrix and new KV cache
+        return (out, (k, v))

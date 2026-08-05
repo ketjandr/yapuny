@@ -18,7 +18,6 @@ GEN_LENGTHS = [32, 64, 128, 256]
 WARMUP_RUNS = 2
 BENCH_RUNS = 5
 
-
 def load_model(checkpoint_path: str, device: str):
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     config = ckpt["config"]
@@ -26,7 +25,6 @@ def load_model(checkpoint_path: str, device: str):
     model.load_state_dict(ckpt["model"])
     model.eval()
     return model
-
 
 def bench_generate(model, idx, max_new_tokens, device):
     """Time a single generate() call, returns elapsed seconds."""
@@ -37,7 +35,6 @@ def bench_generate(model, idx, max_new_tokens, device):
     if device == "cuda":
         torch.cuda.synchronize()
     return time.perf_counter() - t0
-
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark Yapuny inference")
@@ -83,7 +80,6 @@ def main():
 
     print()
     print("(Baseline: naive generate, no KV cache)")
-
 
 if __name__ == "__main__":
     main()
