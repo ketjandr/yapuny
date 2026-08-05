@@ -71,7 +71,28 @@ class GPT(nn.Module):
         return logits, loss, new_caches
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_cache=True):
+        if use_cache:
+            return self._generate_cached(idx, max_new_tokens, temperature, top_k)
+        return self._generate_naive(idx, max_new_tokens, temperature, top_k)
+
+    def _generate_naive(self, idx, max_new_tokens, temperature, top_k):
+        for _ in range(max_new_tokens):
+            idx_cond = idx[:, -self.config.block_size:]
+            logits, _, _ = self(idx_cond)
+            logits = logits[:, -1, :] / temperature
+
+            if top_k is not None:
+                v, _ = torch.topk(logits, top_k)
+                logits[logits < v[:, [-1]]] = float("-inf")
+
+            probs = F.softmax(logits, dim=-1)
+            next_id = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat((idx, next_id), dim=1)
+
+        return idx
+
+    def _generate_cached(self, idx, max_new_tokens, temperature, top_k):
         # prefill: process entire prompt, build KV caches
         idx_cond = idx[:, -self.config.block_size:] # (B, T)
         logits, _, caches = self(idx_cond)

@@ -38,7 +38,7 @@ def estimate_loss(model):
         losses = torch.zeros(EVAL_ITERS)
         for i in range(EVAL_ITERS):
             x, y = get_batch(split)
-            _, loss = model(x, y)
+            _, loss, _ = model(x, y)
             losses[i] = loss.item()
         out[split] = losses.mean().item()
     model.train()
@@ -58,7 +58,7 @@ def train():
             print(f"step {step}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
 
         x, y = get_batch("train")
-        _, loss = model(x, y)
+        _, loss, _ = model(x, y)
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
