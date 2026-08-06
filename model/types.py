@@ -1,4 +1,6 @@
+from typing import Optional
+
 import torch
 
-CacheType = tuple[torch.Tensor, torch.Tensor] | None
-CacheListType = list[CacheType] | None
+CacheType = Optional[tuple[torch.Tensor, torch.Tensor]]
+CacheListType = Optional[list[CacheType]]
