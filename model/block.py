@@ -17,7 +17,7 @@ class Block(nn.Module):
 
     def forward(self, x: torch.Tensor, cache: CacheType = None) -> tuple[torch.Tensor, CacheType]:
         attn_out, new_cache = self.attn(self.ln1(x), cache)
-        x += attn_out
+        x = x + attn_out
         mlp_out = self.mlp(self.ln2(x))
-        x += mlp_out
+        x = x + mlp_out
         return (x, new_cache)

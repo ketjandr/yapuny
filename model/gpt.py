@@ -72,7 +72,7 @@ class GPT(nn.Module):
         return logits, loss, new_caches
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_cache=True):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_cache=False):
         if use_cache:
             return self._generate_cached(idx, max_new_tokens, temperature, top_k)
         else:
@@ -97,7 +97,10 @@ class GPT(nn.Module):
     def _generate_cached(self, idx, max_new_tokens, temperature, top_k):
         # prefill: process entire prompt, build KV caches
         idx_cond = idx[:, -self.config.block_size:] # (B, T)
+
+        # ensure context window doesn't exceed block_size
         max_new_tokens = min(max_new_tokens, self.config.block_size - idx_cond.shape[1] - 1)
+
         logits, _, caches = self(idx_cond)
         logits = logits[:, -1, :] / temperature # (B, vocab_size)
 
