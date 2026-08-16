@@ -13,7 +13,6 @@ B, T, C = 4, 256, 384
 
 @pytest.fixture
 def setup():
-    """Create test tensors and reference LayerNorm."""
     x = torch.randn(B, T, C, device=DEVICE)
     y = torch.randn(B, T, C, device=DEVICE)
     ln = nn.LayerNorm(C).to(DEVICE)
@@ -38,7 +37,7 @@ class TestCorrectness:
     def test_module_wrapper(self, setup):
         x, y, ln = setup
         fused = FusedLayerNormResidual(C).to(DEVICE)
-        # Copy weights from reference
+        # copy weights from reference
         fused.weight.data.copy_(ln.weight.data)
         fused.bias.data.copy_(ln.bias.data)
         expected = ln(x + y)
@@ -56,7 +55,7 @@ class TestCorrectness:
 
 class TestBenchmark:
     @pytest.mark.parametrize("seq_len", [32, 128, 256])
-    def test_benchmark(self, seq_len, benchmark):
+    def test_fused(self, seq_len, benchmark):
         x = torch.randn(B, seq_len, C, device=DEVICE)
         y = torch.randn(B, seq_len, C, device=DEVICE)
         ln = nn.LayerNorm(C).to(DEVICE)
@@ -65,3 +64,14 @@ class TestBenchmark:
             return fused_layernorm_residual(x, y, ln.weight, ln.bias)
 
         benchmark(run_fused)
+
+    @pytest.mark.parametrize("seq_len", [32, 128, 256])
+    def test_vanilla(self, seq_len, benchmark):
+        x = torch.randn(B, seq_len, C, device=DEVICE)
+        y = torch.randn(B, seq_len, C, device=DEVICE)
+        ln = nn.LayerNorm(C).to(DEVICE)
+
+        def run_vanilla():
+            return ln(x + y)
+
+        benchmark(run_vanilla)

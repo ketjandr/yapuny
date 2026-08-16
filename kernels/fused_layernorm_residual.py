@@ -48,7 +48,7 @@ def fused_layernorm_residual(
     orig_shape = x.shape # (B, T, C)
     x_flatten = x.reshape(-1, x.shape[-1])
     y_flatten = y.reshape(-1, y.shape[-1])
-    n_rows, n_cols = x_flatten.shape
+    n_rows, n_cols = x_flatten.shape # (B*T, C)
 
     out = torch.empty_like(x_flatten)
 
