@@ -25,7 +25,8 @@ def _fused_layernorm_residual_kernel(
 
     # calculate normalized embedding from mean and variance
     mean = tl.sum(z) / n_cols
-    variance = tl.sum((z - mean) ** 2) / n_cols
+    diff = tl.where(mask, z - mean, 0.0)
+    variance = tl.sum(diff * diff) / n_cols
     z_norm = (z - mean) * tl.math.rsqrt(variance + eps)
 
     # apply weight * z_norm + bias
