@@ -1,6 +1,7 @@
+import torch
+import torch.nn as nn
 import triton
 import triton.language as tl
-import torch
 
 
 @triton.jit
@@ -34,29 +35,25 @@ def _fused_layernorm_residual_kernel(
 
     tl.store(out_ptr + ptr_offsets, out, mask=mask)
 
-def fused_layernorm_residual(x, y, weight, bias, eps=1e-5):
-    """
-    Python wrapper — reshapes, picks BLOCK_SIZE, launches grid.
-    x: (B, T, C) or (B*T, C) — residual
-    y: same shape — block output
-    weight: (C,)
-    bias: (C,)
-    Returns: out (same shape as x)
-    """
+def fused_layernorm_residual(
+    x: torch.Tensor, # (B, T, C) or (B*T, C) - original embeddings
+    y: torch.Tensor, # (B, T, C) or (B*T, C) - sublayer deltas
+    weight: torch.Tensor, # (C,)
+    bias: torch.Tensor, # (C,)
+    eps: float = 1e-5,
+) -> torch.Tensor: # (B, T, C)
 
-    # flatten to 2D: (B*T, C)
+    # flatten to 2D (B*T, C)
     orig_shape = x.shape # (B, T, C)
     x_flatten = x.reshape(-1, x.shape[-1])
     y_flatten = y.reshape(-1, y.shape[-1])
     n_rows, n_cols = x_flatten.shape
 
-    # Allocate output
     out = torch.empty_like(x_flatten)
 
-    # Pick BLOCK_SIZE: next power of 2 >= n_cols
     BLOCK_SIZE = triton.next_power_of_2(n_cols)
 
-    # Launch grid: one program per row
+    # launch grid: one program per row
     grid = (n_rows,)
     _fused_layernorm_residual_kernel[grid](
         x_flatten, y_flatten, out,
@@ -67,3 +64,13 @@ def fused_layernorm_residual(x, y, weight, bias, eps=1e-5):
     )
 
     return out.reshape(orig_shape)
+
+class FusedLayerNormResidual(nn.Module):
+    def __init__(self, n_embd: int, eps: float = 1e-5):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(n_embd))
+        self.bias = nn.Parameter(torch.zeros(n_embd))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
+        return fused_layernorm_residual(x, residual, self.weight, self.bias, self.eps)
