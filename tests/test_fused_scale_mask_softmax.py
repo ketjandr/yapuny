@@ -66,7 +66,10 @@ class TestBenchmark:
         mask = torch.tril(torch.ones(seq_len, seq_len, device=DEVICE)).unsqueeze(0).unsqueeze(0)
 
         def run_fused():
-            return fused_scale_mask_softmax(scores, mask, SCALE)
+            torch.cuda.synchronize()
+            out = fused_scale_mask_softmax(scores, mask, SCALE)
+            torch.cuda.synchronize()
+            return out
 
         benchmark(run_fused)
 
@@ -76,6 +79,9 @@ class TestBenchmark:
         mask = torch.tril(torch.ones(seq_len, seq_len, device=DEVICE)).unsqueeze(0).unsqueeze(0)
 
         def run_vanilla():
-            return vanilla_scale_mask_softmax(scores, mask, SCALE)
+            torch.cuda.synchronize()
+            out = vanilla_scale_mask_softmax(scores, mask, SCALE)
+            torch.cuda.synchronize()
+            return out
 
         benchmark(run_vanilla)

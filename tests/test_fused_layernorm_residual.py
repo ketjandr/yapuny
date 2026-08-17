@@ -61,7 +61,10 @@ class TestBenchmark:
         ln = nn.LayerNorm(C).to(DEVICE)
 
         def run_fused():
-            return fused_layernorm_residual(x, y, ln.weight, ln.bias)
+            torch.cuda.synchronize()
+            out = fused_layernorm_residual(x, y, ln.weight, ln.bias)
+            torch.cuda.synchronize()
+            return out
 
         benchmark(run_fused)
 
@@ -72,6 +75,9 @@ class TestBenchmark:
         ln = nn.LayerNorm(C).to(DEVICE)
 
         def run_vanilla():
-            return ln(x + y)
+            torch.cuda.synchronize()
+            out = ln(x + y)
+            torch.cuda.synchronize()
+            return out
 
         benchmark(run_vanilla)
