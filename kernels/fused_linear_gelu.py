@@ -48,6 +48,8 @@ def _fused_linear_gelu_kernel(
 
     # apply elementwise GELU
     inner = 0.7978845608 * (acc + 0.044715 * acc * acc * acc)
+    # clamp to prevent exp overflow (tanh(10) == 0.9999...)
+    inner = tl.where(inner > 10.0, 10.0, tl.where(inner < -10.0, -10.0, inner))
     e2 = tl.exp(2.0 * inner)
     acc = 0.5 * acc * (1.0 + (e2 - 1.0) / (e2 + 1.0))
 
