@@ -10,7 +10,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gpu = [
-    "triton",
+    "triton>=3.7",
 ]
 dev = [
     "pytest",
