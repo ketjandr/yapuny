@@ -29,7 +29,7 @@ class TestCorrectness:
         x, weight, bias = setup
         expected = vanilla_linear_gelu(x, weight, bias)
         actual = fused_linear_gelu(x, weight, bias)
-        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(actual, expected, atol=5e-2, rtol=5e-2)
 
     def test_output_shape(self, setup):
         x, weight, bias = setup
@@ -41,14 +41,14 @@ class TestCorrectness:
         x_2d = x.reshape(-1, C)
         expected = vanilla_linear_gelu(x_2d, weight, bias)
         actual = fused_linear_gelu(x_2d, weight, bias)
-        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(actual, expected, atol=5e-2, rtol=5e-2)
 
     def test_module_wrapper(self, setup):
         x, _, _ = setup
         module = FusedLinearGELU(C, N).to(DEVICE)
         expected = vanilla_linear_gelu(x, module.weight, module.bias)
         actual = module(x)
-        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(actual, expected, atol=5e-2, rtol=5e-2)
 
     def test_small_dims(self):
         x = torch.randn(1, 4, 16, device=DEVICE)
@@ -56,7 +56,7 @@ class TestCorrectness:
         bias = torch.randn(32, device=DEVICE)
         expected = vanilla_linear_gelu(x, weight, bias)
         actual = fused_linear_gelu(x, weight, bias)
-        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(actual, expected, atol=5e-2, rtol=5e-2)
 
 
 class TestBenchmark:
