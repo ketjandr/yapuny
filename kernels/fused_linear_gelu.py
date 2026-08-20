@@ -48,7 +48,8 @@ def _fused_linear_gelu_kernel(
 
     # apply elementwise GELU
     inner = 0.7978845608 * (acc + 0.044715 * acc * acc * acc)
-    acc = 0.5 * acc * (1.0 + tl.math.tanh(inner))
+    e2 = tl.exp(2.0 * inner)
+    acc = 0.5 * acc * (1.0 + (e2 - 1.0) / (e2 + 1.0))
 
     # store
     out_ptrs = out_ptr + rm_offsets[:, None] * stride_om + rn_offsets[None, :] * stride_on
