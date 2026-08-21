@@ -6,7 +6,7 @@ import triton.language as tl
 
 @triton.jit
 def _fused_layernorm_residual_kernel(
-    x_ptr, y_ptr, out_ptr, weight_ptr, bias_ptr,
+    x_ptr, residual_ptr, out_ptr, weight_ptr, bias_ptr,
     n_cols,
     eps: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
@@ -18,10 +18,10 @@ def _fused_layernorm_residual_kernel(
     # ptr_offsets is specific to this pid
     ptr_offsets = pid * n_cols + col_offsets
     x = tl.load(x_ptr + ptr_offsets, mask=mask, other=0.0)
-    y = tl.load(y_ptr + ptr_offsets, mask=mask, other=0.0)
+    residual = tl.load(residual_ptr + ptr_offsets, mask=mask, other=0.0)
 
     # z is the result of the residual add
-    z = x + y
+    z = x + residual
 
     # calculate normalized embedding from mean and variance
     mean = tl.sum(z) / n_cols
@@ -38,7 +38,7 @@ def _fused_layernorm_residual_kernel(
 
 def fused_layernorm_residual(
     x: torch.Tensor, # (B, T, C) or (B*T, C) - original embeddings
-    y: torch.Tensor, # (B, T, C) or (B*T, C) - sublayer deltas
+    residual: torch.Tensor, # (B, T, C) or (B*T, C) - sublayer deltas
     weight: torch.Tensor, # (C,)
     bias: torch.Tensor, # (C,)
     eps: float = 1e-5,
@@ -47,7 +47,7 @@ def fused_layernorm_residual(
     # flatten to 2D (B*T, C)
     orig_shape = x.shape # (B, T, C)
     x_flatten = x.reshape(-1, x.shape[-1])
-    y_flatten = y.reshape(-1, y.shape[-1])
+    residual_flatten = residual.reshape(-1, residual.shape[-1])
     n_rows, n_cols = x_flatten.shape # (B*T, C)
 
     out = torch.empty_like(x_flatten)
@@ -57,7 +57,7 @@ def fused_layernorm_residual(
     # launch grid: one program per row
     grid = (n_rows,)
     _fused_layernorm_residual_kernel[grid](
-        x_flatten, y_flatten, out,
+        x_flatten, residual_flatten, out,
         weight, bias,
         n_cols,
         eps=eps,
