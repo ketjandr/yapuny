@@ -1,3 +1,4 @@
+import random
 import torch
 import torch.nn as nn
 import triton
@@ -45,7 +46,7 @@ def fused_dropout_residual(
     BLOCK_SIZE = 1024
     grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
 
-    seed = torch.randint(0, 2**31, (1,), device=x.device).item()
+    seed = random.randint(0, 2**31)
 
     _fused_dropout_residual_kernel[grid](
         x, residual, out,

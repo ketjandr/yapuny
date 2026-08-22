@@ -1,3 +1,4 @@
+import random
 import torch
 import torch.nn as nn
 import triton
@@ -79,7 +80,7 @@ def fused_linear_dropout(
 
     grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
 
-    seed = torch.randint(0, 2**31, (1,), device=x.device).item()
+    seed = random.randint(0, 2**31)
 
     _fused_linear_dropout_kernel[grid](
         x_2d, weight, bias, out,
