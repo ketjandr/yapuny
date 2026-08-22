@@ -29,7 +29,7 @@ def _fused_linear_dropout_kernel(
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
-    # tiled reduction over K
+    # linear layer: tiled reduction over K
     for k_start in range(0, K, BLOCK_K):
         k_offsets = k_start + tl.arange(0, BLOCK_K)
 
@@ -49,7 +49,7 @@ def _fused_linear_dropout_kernel(
     acc += bias[None, :]
 
     if is_training:
-        # generate a 2d tensor (from 0, 1, ...)
+        # generate a 2d tensor (from 0, 1, ..., N*M - 1)
         dropout_offsets = rm_offsets[:, None] * N + rn_offsets[None, :]
         dropout_mask = tl.rand(seed, dropout_offsets)
         acc = tl.where(dropout_mask >= p_drop, acc / (1 - p_drop), 0.0)

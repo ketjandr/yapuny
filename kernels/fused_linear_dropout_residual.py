@@ -1,3 +1,5 @@
+import random
+
 import torch
 import torch.nn as nn
 import triton
@@ -5,17 +7,19 @@ import triton.language as tl
 
 
 @triton.jit
-def _fused_linear_gelu_kernel(
-    x_ptr, # (M, K)
-    w_ptr, # (N, K)
-    bias_ptr, # (N,)
-    out_ptr, # (M, N)
-    M, # rows in x
-    N, # output features
-    K, # input features
+def _fused_linear_dropout_residual_kernel(
+    x_ptr,
+    w_ptr,
+    bias_ptr,
+    x_skip_ptr,
+    out_ptr,
+    seed,
+    M, N, K,
+    p_drop,
     stride_xm, stride_xk,
     stride_wn, stride_wk,
     stride_om, stride_on,
+    is_training: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -44,64 +48,79 @@ def _fused_linear_gelu_kernel(
     # add bias
     mask_bias = rn_offsets < N
     bias = tl.load(bias_ptr + rn_offsets, mask=mask_bias, other=0.0)
-    acc += bias[None, :]
+    acc += bias[None, :]  # acc is now the residual (sublayer output)
 
-    # gelu: apply elementwise GELU
-    inner = 0.7978845608 * (acc + 0.044715 * acc * acc * acc)
-    # clamp to prevent exp overflow (tanh(10) == 0.9999...)
-    inner = tl.where(inner > 10.0, 10.0, tl.where(inner < -10.0, -10.0, inner))
-    e2 = tl.exp(2.0 * inner)
-    acc = 0.5 * acc * (1.0 + (e2 - 1.0) / (e2 + 1.0))
+    # dropout
+    if is_training:
+        # generate a 2d tensor (from 0, 1, ..., N*M - 1)
+        dropout_offsets = rm_offsets[:, None] * N + rn_offsets[None, :]
+        dropout_mask = tl.rand(seed, dropout_offsets)
+        acc = tl.where(dropout_mask >= p_drop,  acc / (1 - p_drop), 0.0)
 
-    # store
-    out_ptrs = out_ptr + rm_offsets[:, None] * stride_om + rn_offsets[None, :] * stride_on
+    # residual add: out = x_skip + dropout(acc)
     mask_out = (rm_offsets[:, None] < M) & (rn_offsets[None, :] < N)
-    tl.store(out_ptrs, acc, mask=mask_out)
+    skip_ptrs = x_skip_ptr + rm_offsets[:, None] * stride_om + rn_offsets[None, :] * stride_on
+    x_skip = tl.load(skip_ptrs, mask=mask_out, other=0.0)
+
+    out_ptrs = out_ptr + rm_offsets[:, None] * stride_om + rn_offsets[None, :] * stride_on
+    out = x_skip + acc
+
+    tl.store(out_ptrs, out, mask=mask_out)
 
 
-def fused_linear_gelu(
-    x: torch.Tensor, # (M, K) or (B, T, C)
+def fused_linear_dropout_residual(
+    x: torch.Tensor, # input to linear layer (sublayer input)
     weight: torch.Tensor, # (N, K)
     bias: torch.Tensor, # (N,)
+    x_skip: torch.Tensor, # original input (skip connection)
+    p_drop: float = 0.1,
+    training: bool = True,
 ) -> torch.Tensor:
-    """Fused linear (matmul + bias) + GELU activation."""
+    """Fused linear (matmul + bias) + dropout + residual add."""
     orig_shape = x.shape
-    # flatten to 2D
     x_2d = x.reshape(-1, x.shape[-1])
     M, K = x_2d.shape
     N = weight.shape[0]
 
+    # x_skip must match output shape
+    x_skip_2d = x_skip.reshape(-1, x_skip.shape[-1])
+
     out = torch.empty((M, N), device=x.device, dtype=x.dtype)
 
-    # tile sizes (arbitrary)
     BLOCK_M = 64
     BLOCK_N = 64
     BLOCK_K = 32
 
     grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
+    seed = random.randint(0, 2**31)
 
-    _fused_linear_gelu_kernel[grid](
-        x_2d, weight, bias, out,
+    _fused_linear_dropout_residual_kernel[grid](
+        x_2d, weight, bias, x_skip_2d, out,
+        seed,
         M, N, K,
+        p_drop,
         x_2d.stride(0), x_2d.stride(1),
         weight.stride(0), weight.stride(1),
         out.stride(0), out.stride(1),
+        is_training=training,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
         BLOCK_K=BLOCK_K,
     )
 
-    # reshape back: (*orig_shape[:-1], N)
     return out.reshape(*orig_shape[:-1], N)
 
 
-class FusedLinearGELU(nn.Module):
-    def __init__(self, in_features: int, out_features: int):
+class FusedLinearDropoutResidual(nn.Module):
+    def __init__(self, in_features: int, out_features: int, p_drop: float = 0.1):
         super().__init__()
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
         self.bias = nn.Parameter(torch.empty(out_features))
+        self.p_drop = p_drop
         nn.init.kaiming_uniform_(self.weight)
         nn.init.zeros_(self.bias)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return fused_linear_gelu(x, self.weight, self.bias)
+    def forward(self, x: torch.Tensor, x_skip: torch.Tensor) -> torch.Tensor:
+        return fused_linear_dropout_residual(
+            x, self.weight, self.bias, x_skip, self.p_drop, self.training
+        )

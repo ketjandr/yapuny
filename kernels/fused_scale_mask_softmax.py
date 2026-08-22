@@ -39,10 +39,10 @@ def _fused_scale_mask_softmax_kernel(
     tl.store(out_ptr + ptr_offsets, out, mask=mask)
 
 def fused_scale_mask_softmax(
-    scores: torch.Tensor, # (B, n_head, T, T_k) — raw Q@K^T
-    mask: torch.Tensor, # (1, 1, T, T_k) or (T, T_k) — causal mask (1=keep, 0=mask)
+    scores: torch.Tensor, # (B, n_head, T, T_k) - raw Q@K^T
+    mask: torch.Tensor, # (1, 1, T, T_k) or (T, T_k) - causal mask (1=keep, 0=mask)
     scale: float, # 1/sqrt(head_dim)
-) -> torch.Tensor: # (B, n_head, T, T_k) — softmax probabilities
+) -> torch.Tensor: # (B, n_head, T, T_k) - softmax probabilities
     orig_shape = scores.shape
     B, n_head, T, T_k = orig_shape
 

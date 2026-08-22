@@ -5,7 +5,7 @@ import triton.language as tl
 
 
 @triton.jit
-def _fused_layernorm_residual_kernel(
+def _fused_residual_layernorm_kernel(
     x_ptr, residual_ptr, out_ptr, weight_ptr, bias_ptr,
     n_cols,
     eps: tl.constexpr,
@@ -20,9 +20,10 @@ def _fused_layernorm_residual_kernel(
     x = tl.load(x_ptr + ptr_offsets, mask=mask, other=0.0)
     residual = tl.load(residual_ptr + ptr_offsets, mask=mask, other=0.0)
 
-    # z is the result of the residual add
+    # residual add
     z = x + residual
 
+    # layernorm
     # calculate normalized embedding from mean and variance
     mean = tl.sum(z) / n_cols
     diff = tl.where(mask, z - mean, 0.0)
@@ -36,7 +37,7 @@ def _fused_layernorm_residual_kernel(
 
     tl.store(out_ptr + ptr_offsets, out, mask=mask)
 
-def fused_layernorm_residual(
+def fused_residual_layernorm(
     x: torch.Tensor, # (B, T, C) or (B*T, C) - original embeddings
     residual: torch.Tensor, # (B, T, C) or (B*T, C) - sublayer deltas
     weight: torch.Tensor, # (C,)
@@ -56,7 +57,7 @@ def fused_layernorm_residual(
 
     # launch grid: one program per row
     grid = (n_rows,)
-    _fused_layernorm_residual_kernel[grid](
+    _fused_residual_layernorm_kernel[grid](
         x_flatten, residual_flatten, out,
         weight, bias,
         n_cols,
@@ -66,7 +67,7 @@ def fused_layernorm_residual(
 
     return out.reshape(orig_shape)
 
-class FusedLayerNormResidual(nn.Module):
+class FusedResidualLayerNorm(nn.Module):
     def __init__(self, n_embd: int, eps: float = 1e-5):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(n_embd))
@@ -74,4 +75,4 @@ class FusedLayerNormResidual(nn.Module):
         self.eps = eps
 
     def forward(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
-        return fused_layernorm_residual(x, residual, self.weight, self.bias, self.eps)
+        return fused_residual_layernorm(x, residual, self.weight, self.bias, self.eps)
