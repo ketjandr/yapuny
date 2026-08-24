@@ -57,7 +57,7 @@ def _flash_attention_kernel(
         mask_k = kn_offsets[:, None] < seq_len
         k_tile = tl.load(k_ptrs, mask=mask_k, other=0.0) # (BLOCK_N, HEAD_DIM)
 
-        s_tile = q_tile @ tl.trans(k_tile) * scale
+        s_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
 
         # apply causal mask
         if is_causal:
@@ -75,7 +75,7 @@ def _flash_attention_kernel(
         correction = tl.exp(m - m_new)
         numerator = tl.exp(s_tile - m_new[:, None]) # (BLOCK_M, BLOCK_N)
         l_new = correction * l + tl.sum(numerator, axis=1) # new running sum
-        acc = correction[:, None] * acc + numerator @ v_tile
+        acc = correction[:, None] * acc + tl.dot(numerator, v_tile)
         m = m_new
         l = l_new
 
