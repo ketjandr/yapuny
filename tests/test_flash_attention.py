@@ -20,20 +20,30 @@ def setup():
     return q, k, v
 
 
-def vanilla_attention(q, k, v, is_causal=True):
+def sdpa_attention(q, k, v, is_causal=True):
     return F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
+
+
+def naive_attention(q, k, v, is_causal=True):
+    scale = q.shape[-1] ** -0.5
+    s = q @ k.transpose(-2, -1) * scale
+    if is_causal:
+        mask = torch.tril(torch.ones(s.shape[-2], s.shape[-1], device=s.device))
+        s = s.masked_fill(mask == 0, float("-inf"))
+    p = torch.softmax(s, dim=-1)
+    return p @ v
 
 
 class TestCorrectness:
     def test_causal_matches_pytorch(self, setup):
         q, k, v = setup
-        expected = vanilla_attention(q, k, v, is_causal=True)
+        expected = sdpa_attention(q, k, v, is_causal=True)
         actual = flash_attention(q, k, v, is_causal=True)
         torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
     def test_non_causal_matches_pytorch(self, setup):
         q, k, v = setup
-        expected = vanilla_attention(q, k, v, is_causal=False)
+        expected = sdpa_attention(q, k, v, is_causal=False)
         actual = flash_attention(q, k, v, is_causal=False)
         torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
@@ -42,7 +52,7 @@ class TestCorrectness:
         q = torch.randn(1, 2, 8, D, device=DEVICE)
         k = torch.randn(1, 2, 8, D, device=DEVICE)
         v = torch.randn(1, 2, 8, D, device=DEVICE)
-        expected = vanilla_attention(q, k, v, is_causal=True)
+        expected = sdpa_attention(q, k, v, is_causal=True)
         actual = flash_attention(q, k, v, is_causal=True)
         torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
@@ -52,7 +62,7 @@ class TestCorrectness:
         q = torch.randn(1, 2, seq_len, D, device=DEVICE)
         k = torch.randn(1, 2, seq_len, D, device=DEVICE)
         v = torch.randn(1, 2, seq_len, D, device=DEVICE)
-        expected = vanilla_attention(q, k, v, is_causal=True)
+        expected = sdpa_attention(q, k, v, is_causal=True)
         actual = flash_attention(q, k, v, is_causal=True)
         torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
@@ -61,14 +71,14 @@ class TestCorrectness:
         q = torch.randn(4, H, T, D, device=DEVICE)
         k = torch.randn(4, H, T, D, device=DEVICE)
         v = torch.randn(4, H, T, D, device=DEVICE)
-        expected = vanilla_attention(q, k, v, is_causal=True)
+        expected = sdpa_attention(q, k, v, is_causal=True)
         actual = flash_attention(q, k, v, is_causal=True)
         torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
     def test_module_wrapper(self, setup):
         q, k, v = setup
         module = FlashAttention(is_causal=True)
-        expected = vanilla_attention(q, k, v, is_causal=True)
+        expected = sdpa_attention(q, k, v, is_causal=True)
         actual = module(q, k, v)
         torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
@@ -90,16 +100,31 @@ class TestBenchmark:
         benchmark(run_flash)
 
     @pytest.mark.parametrize("seq_len", [64, 128, 256])
-    def test_vanilla(self, seq_len, benchmark):
+    def test_sdpa(self, seq_len, benchmark):
         torch.manual_seed(42)
         q = torch.randn(B, H, seq_len, D, device=DEVICE)
         k = torch.randn(B, H, seq_len, D, device=DEVICE)
         v = torch.randn(B, H, seq_len, D, device=DEVICE)
 
-        def run_vanilla():
+        def run_sdpa():
             torch.cuda.synchronize()
-            out = vanilla_attention(q, k, v, is_causal=True)
+            out = sdpa_attention(q, k, v, is_causal=True)
             torch.cuda.synchronize()
             return out
 
-        benchmark(run_vanilla)
+        benchmark(run_sdpa)
+
+    @pytest.mark.parametrize("seq_len", [64, 128, 256])
+    def test_naive(self, seq_len, benchmark):
+        torch.manual_seed(42)
+        q = torch.randn(B, H, seq_len, D, device=DEVICE)
+        k = torch.randn(B, H, seq_len, D, device=DEVICE)
+        v = torch.randn(B, H, seq_len, D, device=DEVICE)
+
+        def run_naive():
+            torch.cuda.synchronize()
+            out = naive_attention(q, k, v, is_causal=True)
+            torch.cuda.synchronize()
+            return out
+
+        benchmark(run_naive)
