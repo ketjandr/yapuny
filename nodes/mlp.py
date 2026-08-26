@@ -4,6 +4,8 @@ from torch.nn import functional as F
 
 
 class MLPUp(nn.Module):
+    """Up-project: n_embd - 4*n_embd."""
+
     def __init__(self, n_embd: int):
         super().__init__()
         self.fc = nn.Linear(n_embd, 4 * n_embd)
@@ -18,10 +20,11 @@ class MLPActivation(nn.Module):
 
 
 class MLPDown(nn.Module):
-    def __init__(self, n_embd: int, dropout: float):
+    """Down-project: 4*n_embd - n_embd."""
+
+    def __init__(self, n_embd: int):
         super().__init__()
         self.fc = nn.Linear(4 * n_embd, n_embd)
-        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.dropout(self.fc(x))
+        return self.fc(x)

@@ -1,4 +1,13 @@
-from nodes.attention import CausalAttention, OutProjection, QKVProjection
+from nodes.attention import (
+    AttentionScore,
+    CausalMask,
+    KVCache,
+    OutProjection,
+    QKVProjection,
+    Softmax,
+    ValueWeightedSum,
+)
+from nodes.dropout import Dropout
 from nodes.embeddings import PositionEmbedding, TokenEmbedding
 from nodes.head import LMHead
 from nodes.mlp import MLPActivation, MLPDown, MLPUp
@@ -9,7 +18,12 @@ __all__ = [
     "TokenEmbedding",
     "PositionEmbedding",
     "QKVProjection",
-    "CausalAttention",
+    "KVCache",
+    "AttentionScore",
+    "CausalMask",
+    "Softmax",
+    "Dropout",
+    "ValueWeightedSum",
     "OutProjection",
     "MLPUp",
     "MLPActivation",

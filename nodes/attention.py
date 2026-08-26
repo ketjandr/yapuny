@@ -8,6 +8,8 @@ from model.types import CacheType
 
 
 class QKVProjection(nn.Module):
+    """Single linear - split into Q, K, V - reshape to multi-head."""
+
     def __init__(self, n_embd: int, n_head: int):
         super().__init__()
         self.n_head = n_head
@@ -28,58 +30,73 @@ class QKVProjection(nn.Module):
         return q, k, v
 
 
-class CausalAttention(nn.Module):
-    """Scaled dot-product attention with causal mask and KV cache.
-
-    Flash attention replaces exactly this node.
-    """
-
-    def __init__(self, block_size: int, head_dim: int, dropout: float):
-        super().__init__()
-        self.head_dim = head_dim
-        self.attn_dropout = nn.Dropout(dropout)
-        # apply causal mask
-        mask = torch.tril(torch.ones(block_size, block_size))
-        self.register_buffer("mask", mask.view(1, 1, block_size, block_size))
+class KVCache(nn.Module):
+    """Concatenates new K, V with cached K, V from previous steps."""
 
     def forward(
         self,
-        q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
         cache: CacheType = None,
-    ) -> tuple[torch.Tensor, CacheType]:
+    ) -> tuple[torch.Tensor, torch.Tensor, CacheType]:
         # concat k, v into cached_k, cached_v
         if cache is not None:
             cached_k, cached_v = cache
             k = torch.cat([cached_k, k], dim=2)
             v = torch.cat([cached_v, v], dim=2)
+        return k, v, (k, v)
 
-        T = q.shape[2]
-        S = k.shape[2]
 
+class AttentionScore(nn.Module):
+    """Q @ K^T scaled by 1/sqrt(head_dim)."""
+
+    def __init__(self, head_dim: int):
+        super().__init__()
+        self.scale = 1.0 / math.sqrt(head_dim)
+
+    def forward(self, q: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
         # scaled dot-product attention
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(self.head_dim)) # (B, n_head, T, T)
+        return (q @ k.transpose(-2, -1)) * self.scale # (B, n_head, T, S)
 
+
+class CausalMask(nn.Module):
+    """Applies lower-triangular causal mask to attention scores."""
+
+    def __init__(self, block_size: int):
+        super().__init__()
+        # apply causal mask
+        mask = torch.tril(torch.ones(block_size, block_size))
+        self.register_buffer("mask", mask.view(1, 1, block_size, block_size))
+
+    def forward(self, att: torch.Tensor) -> torch.Tensor:
+        T = att.shape[2]
+        S = att.shape[3]
         # masking only happens when T > 1 (e.g. when cache is None)
         if T > 1:
             att = att.masked_fill(self.mask[:, :, :T, :S] == 0, float("-inf"))
+        return att
 
-        att = F.softmax(att, dim=-1)
-        att = self.attn_dropout(att)
 
-        out = att @ v # (B, n_head, T, head_dim)
-        # return the out matrix and new KV cache
-        return out, (k, v)
+class Softmax(nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.softmax(x, dim=-1)
+
+
+class ValueWeightedSum(nn.Module):
+    """att_probs @ V - weighted combination of value vectors."""
+
+    def forward(self, att: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        return att @ v # (B, n_head, T, head_dim)
 
 
 class OutProjection(nn.Module):
-    def __init__(self, n_embd: int, dropout: float):
+    """Merge heads back to (B, T, C) and project."""
+
+    def __init__(self, n_embd: int):
         super().__init__()
         self.proj = nn.Linear(n_embd, n_embd)
-        self.resid_dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, n_head, T, head_dim = x.shape
         x = x.transpose(1, 2).contiguous().view(B, T, n_head * head_dim) # merge heads back (B, T, C)
-        return self.resid_dropout(self.proj(x))
+        return self.proj(x)
