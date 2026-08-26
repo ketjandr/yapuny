@@ -30,7 +30,7 @@ def _quantized_linear_w8_kernel(
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
-    # linear layer: tiled reduction over K
+    # linear layer: tiled reduction over K + dequantize
     for k_start in range(0, K, BLOCK_K):
         k_offsets = k_start + tl.arange(0, BLOCK_K)
 
