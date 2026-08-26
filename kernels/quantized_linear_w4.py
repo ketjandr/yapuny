@@ -38,9 +38,9 @@ def _quantized_linear_w4_kernel(
         mask_w = (rn_offsets[:, None] < N) & (k_packed_offsets[None, :] < K // 2)
         w_packed_tile = tl.load(w_q_ptrs, mask=mask_w, other=0) # (BLOCK_N, BLOCK_K // 2)
 
-        # unpack nibbles and sign extend
-        lo = ((w_packed_tile & 0xF) ^ 8) - 8
-        hi = (((w_packed_tile >> 4) & 0xF) ^ 8) - 8
+        # unpack nibbles and sign extend (cast to int8 before subtract to avoid uint8 underflow)
+        lo = ((w_packed_tile & 0xF) ^ 8).to(tl.int8) - 8
+        hi = (((w_packed_tile >> 4) & 0xF) ^ 8).to(tl.int8) - 8
 
         # dequantize both lo and hi
         lo_dq = lo.to(tl.float32) * scale[:, None] # (BLOCK_N, BLOCK_K // 2)

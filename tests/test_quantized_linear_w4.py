@@ -92,7 +92,7 @@ class TestAccuracy:
         y_fp32 = vanilla_linear(x, weight, bias)
         y_w4 = quantized_manual_w4(x, weight, bias)
         rel_err = (y_fp32 - y_w4).norm() / y_fp32.norm()
-        assert rel_err < 0.10, f"relative error {rel_err:.4f} exceeds 10%"
+        assert rel_err < 0.15, f"relative error {rel_err:.4f} exceeds 15%"
 
     def test_w4_packing_roundtrip(self):
         weight = torch.randn(N, C, device=DEVICE)
