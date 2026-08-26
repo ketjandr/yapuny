@@ -96,7 +96,6 @@ def flash_attention(
     v: torch.Tensor,  # (B, H, T, D)
     is_causal: bool = True,
 ) -> torch.Tensor:
-    """Flash Attention: memory-efficient exact attention."""
     B, H, T, D = q.shape
     scale = D ** -0.5
 
