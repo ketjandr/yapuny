@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from kernels.flash_attention import FlashAttention, flash_attention
+from kernels.fusion.flash_attention import FlashAttention, flash_attention
 
 # Skip all tests if CUDA not available
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")

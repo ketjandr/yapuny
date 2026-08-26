@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from kernels.fused_linear_dropout_residual import (
+from kernels.fusion.fused_linear_dropout_residual import (
     FusedLinearDropoutResidual,
     fused_linear_dropout_residual,
 )

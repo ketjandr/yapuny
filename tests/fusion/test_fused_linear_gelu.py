@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from kernels.fused_linear_gelu import FusedLinearGELU, fused_linear_gelu
+from kernels.fusion.fused_linear_gelu import FusedLinearGELU, fused_linear_gelu
 
 # Skip all tests if CUDA not available
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")

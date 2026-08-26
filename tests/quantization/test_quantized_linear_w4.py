@@ -2,12 +2,12 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from kernels.quantize import (
+from kernels.quantization.quantize import (
     dequantize_weights_int4,
     quantize_weights_int4,
     quantize_weights_int8,
 )
-from kernels.quantized_linear_w4 import QuantizedLinearW4, quantized_linear_w4
+from kernels.quantization.quantized_linear_w4 import QuantizedLinearW4, quantized_linear_w4
 
 # Skip all tests if CUDA not available
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")

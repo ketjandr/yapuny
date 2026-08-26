@@ -5,6 +5,9 @@ from torch.nn import functional as F
 from model.block import Block
 from model.config import GPTConfig
 from model.types import CacheListType
+from nodes.embeddings import PositionEmbedding, TokenEmbedding
+from nodes.head import LMHead
+from nodes.normalization import LayerNorm
 
 
 class GPT(nn.Module):
@@ -12,12 +15,12 @@ class GPT(nn.Module):
         super().__init__()
         self.config = config
 
-        self.token_emb = nn.Embedding(config.vocab_size, config.n_embd)
-        self.pos_emb = nn.Embedding(config.block_size, config.n_embd)
+        self.token_emb = TokenEmbedding(config.vocab_size, config.n_embd)
+        self.pos_emb = PositionEmbedding(config.block_size, config.n_embd)
         self.dropout = nn.Dropout(config.dropout)
         self.blocks = nn.ModuleList([Block(config) for _ in range(config.n_layer)])
-        self.ln_f = nn.LayerNorm(config.n_embd)
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.ln_f = LayerNorm(config.n_embd)
+        self.lm_head = LMHead(config.n_embd, config.vocab_size)
 
         self.apply(self._init_weights)
 
@@ -33,7 +36,7 @@ class GPT(nn.Module):
         self,
         idx: torch.Tensor,
         targets: torch.Tensor = None,
-        caches: CacheListType = None
+        caches: CacheListType = None,
     ):
         B, T = idx.shape # (B, T)
         assert T <= self.config.block_size, "sequence longer than block_size"

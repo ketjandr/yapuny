@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from kernels.fused_residual_layernorm import FusedResidualLayerNorm, fused_residual_layernorm
+from kernels.fusion.fused_residual_layernorm import FusedResidualLayerNorm, fused_residual_layernorm
 
 # Skip all tests if CUDA not available
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")

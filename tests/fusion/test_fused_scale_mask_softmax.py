@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from kernels.fused_scale_mask_softmax import FusedScaleMaskSoftmax, fused_scale_mask_softmax
+from kernels.fusion.fused_scale_mask_softmax import FusedScaleMaskSoftmax, fused_scale_mask_softmax
 
 # Skip all tests if CUDA not available
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")

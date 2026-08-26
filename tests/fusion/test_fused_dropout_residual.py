@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from kernels.fused_dropout_residual import FusedDropoutResidual, fused_dropout_residual
+from kernels.fusion.fused_dropout_residual import FusedDropoutResidual, fused_dropout_residual
 
 # Skip all tests if CUDA not available
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from kernels.fused_dropout_residual_layernorm import (
+from kernels.fusion.fused_dropout_residual_layernorm import (
     FusedDropoutResidualLayerNorm,
     fused_dropout_residual_layernorm,
 )
