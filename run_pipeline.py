@@ -25,13 +25,18 @@ def step_tokenize():
     tok = train_tokenizer()
     save_tokenizer(tok)
 
+
 def step_prepare():
     from data.prepare import prepare
+
     prepare()
+
 
 def step_train():
     from train import train
+
     train()
+
 
 STEPS = {
     "tokenize": step_tokenize,

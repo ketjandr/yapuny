@@ -9,7 +9,7 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA requ
 
 DEVICE = "cuda"
 B, N_HEAD, T, T_K, HEAD_DIM = 1, 6, 256, 256, 64
-SCALE = 1.0 / (HEAD_DIM ** 0.5)
+SCALE = 1.0 / (HEAD_DIM**0.5)
 
 
 @pytest.fixture

@@ -11,10 +11,15 @@ def _quantized_linear_w8_kernel(
     scale_ptr,  # (N,), dtype float32
     bias_ptr,  # (N,)
     y_ptr,  # (M, N)
-    M, N, K,
-    stride_xm, stride_xk,
-    stride_wn, stride_wk,
-    stride_ym, stride_yn,
+    M,
+    N,
+    K,
+    stride_xm,
+    stride_xk,
+    stride_wn,
+    stride_wk,
+    stride_ym,
+    stride_yn,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -56,6 +61,7 @@ def _quantized_linear_w8_kernel(
     mask_y = (rm_offsets[:, None] < M) & (rn_offsets[None, :] < N)
     tl.store(y_ptrs, acc, mask=mask_y)
 
+
 def quantized_linear_w8(
     x: torch.Tensor,  # (M, K) or (B, T, C)
     w_q: torch.Tensor,  # (N, K), dtype int8
@@ -63,7 +69,7 @@ def quantized_linear_w8(
     bias: torch.Tensor,  # (N,)
 ) -> torch.Tensor:
     orig_shape = x.shape
-    x_2d = x.reshape(-1, x.shape[-1]) # flatten to (M, K) where M = B*T most likely
+    x_2d = x.reshape(-1, x.shape[-1])  # flatten to (M, K) where M = B*T most likely
 
     M, K = x_2d.shape
     N = w_q.shape[0]
@@ -77,11 +83,20 @@ def quantized_linear_w8(
     grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
 
     _quantized_linear_w8_kernel[grid](
-        x_2d, w_q, scale, bias, y,
-        M, N, K,
-        x_2d.stride(0), x_2d.stride(1),
-        w_q.stride(0), w_q.stride(1),
-        y.stride(0), y.stride(1),
+        x_2d,
+        w_q,
+        scale,
+        bias,
+        y,
+        M,
+        N,
+        K,
+        x_2d.stride(0),
+        x_2d.stride(1),
+        w_q.stride(0),
+        w_q.stride(1),
+        y.stride(0),
+        y.stride(1),
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
         BLOCK_K=BLOCK_K,

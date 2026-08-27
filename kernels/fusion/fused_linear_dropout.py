@@ -12,11 +12,16 @@ def _fused_linear_dropout_kernel(
     bias_ptr,
     out_ptr,
     seed,
-    M, N, K,
+    M,
+    N,
+    K,
     p_drop,
-    stride_xm, stride_xk,
-    stride_wn, stride_wk,
-    stride_om, stride_on,
+    stride_xm,
+    stride_xk,
+    stride_wn,
+    stride_wk,
+    stride_om,
+    stride_on,
     is_training: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
@@ -61,9 +66,9 @@ def _fused_linear_dropout_kernel(
 
 
 def fused_linear_dropout(
-    x: torch.Tensor, # (B, T, C)
-    weight: torch.Tensor, # (N, K)
-    bias: torch.Tensor, # (N,)
+    x: torch.Tensor,  # (B, T, C)
+    weight: torch.Tensor,  # (N, K)
+    bias: torch.Tensor,  # (N,)
     p_drop: float = 0.1,
     training: bool = True,
 ) -> torch.Tensor:
@@ -83,13 +88,21 @@ def fused_linear_dropout(
     seed = random.randint(0, 2**31)
 
     _fused_linear_dropout_kernel[grid](
-        x_2d, weight, bias, out,
+        x_2d,
+        weight,
+        bias,
+        out,
         seed,
-        M, N, K,
+        M,
+        N,
+        K,
         p_drop,
-        x_2d.stride(0), x_2d.stride(1),
-        weight.stride(0), weight.stride(1),
-        out.stride(0), out.stride(1),
+        x_2d.stride(0),
+        x_2d.stride(1),
+        weight.stride(0),
+        weight.stride(1),
+        out.stride(0),
+        out.stride(1),
         is_training=training,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,

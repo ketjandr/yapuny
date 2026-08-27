@@ -18,14 +18,17 @@ CHECKPOINT_PATH = Path(__file__).parent / "checkpoints" / "yapuny.pt"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
+
 def get_batch(split: str):
     """Load a random batch of (input, target) sequences from the memmapped .bin file."""
     path = DATA_DIR / ("train.bin" if split == "train" else "val.bin")
     data = np.memmap(path, dtype=np.uint16, mode="r")
 
-    ix = torch.randint(len(data) - BLOCK_SIZE, (BATCH_SIZE,)) # randomly sample starting token pos
-    x = torch.stack([torch.from_numpy(data[i:i + BLOCK_SIZE].astype(np.int64)) for i in ix])
-    y = torch.stack([torch.from_numpy(data[i + 1:i + 1 + BLOCK_SIZE].astype(np.int64)) for i in ix])
+    ix = torch.randint(len(data) - BLOCK_SIZE, (BATCH_SIZE,))  # randomly sample starting token pos
+    x = torch.stack([torch.from_numpy(data[i : i + BLOCK_SIZE].astype(np.int64)) for i in ix])
+    y = torch.stack(
+        [torch.from_numpy(data[i + 1 : i + 1 + BLOCK_SIZE].astype(np.int64)) for i in ix]
+    )
     return x.to(device), y.to(device)
 
 

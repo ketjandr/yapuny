@@ -6,16 +6,19 @@ import triton.language as tl
 
 @triton.jit
 def _fused_linear_gelu_kernel(
-    x_ptr, # (M, K)
-    w_ptr, # (N, K)
-    bias_ptr, # (N,)
-    out_ptr, # (M, N)
-    M, # rows in x
-    N, # output features
-    K, # input features
-    stride_xm, stride_xk,
-    stride_wn, stride_wk,
-    stride_om, stride_on,
+    x_ptr,  # (M, K)
+    w_ptr,  # (N, K)
+    bias_ptr,  # (N,)
+    out_ptr,  # (M, N)
+    M,  # rows in x
+    N,  # output features
+    K,  # input features
+    stride_xm,
+    stride_xk,
+    stride_wn,
+    stride_wk,
+    stride_om,
+    stride_on,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -60,9 +63,9 @@ def _fused_linear_gelu_kernel(
 
 
 def fused_linear_gelu(
-    x: torch.Tensor, # (M, K) or (B, T, C)
-    weight: torch.Tensor, # (N, K)
-    bias: torch.Tensor, # (N,)
+    x: torch.Tensor,  # (M, K) or (B, T, C)
+    weight: torch.Tensor,  # (N, K)
+    bias: torch.Tensor,  # (N,)
 ) -> torch.Tensor:
     """Fused linear (matmul + bias) + GELU activation."""
     orig_shape = x.shape
@@ -81,11 +84,19 @@ def fused_linear_gelu(
     grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
 
     _fused_linear_gelu_kernel[grid](
-        x_2d, weight, bias, out,
-        M, N, K,
-        x_2d.stride(0), x_2d.stride(1),
-        weight.stride(0), weight.stride(1),
-        out.stride(0), out.stride(1),
+        x_2d,
+        weight,
+        bias,
+        out,
+        M,
+        N,
+        K,
+        x_2d.stride(0),
+        x_2d.stride(1),
+        weight.stride(0),
+        weight.stride(1),
+        out.stride(0),
+        out.stride(1),
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
         BLOCK_K=BLOCK_K,

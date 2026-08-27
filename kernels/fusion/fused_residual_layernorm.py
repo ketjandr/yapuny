@@ -6,7 +6,11 @@ import triton.language as tl
 
 @triton.jit
 def _fused_residual_layernorm_kernel(
-    x_ptr, residual_ptr, out_ptr, weight_ptr, bias_ptr,
+    x_ptr,
+    residual_ptr,
+    out_ptr,
+    weight_ptr,
+    bias_ptr,
     n_cols,
     eps: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
@@ -37,19 +41,20 @@ def _fused_residual_layernorm_kernel(
 
     tl.store(out_ptr + ptr_offsets, out, mask=mask)
 
+
 def fused_residual_layernorm(
-    x: torch.Tensor, # (B, T, C) or (B*T, C) - original embeddings
-    residual: torch.Tensor, # (B, T, C) or (B*T, C) - sublayer deltas
-    weight: torch.Tensor, # (C,)
-    bias: torch.Tensor, # (C,)
+    x: torch.Tensor,  # (B, T, C) or (B*T, C) - original embeddings
+    residual: torch.Tensor,  # (B, T, C) or (B*T, C) - sublayer deltas
+    weight: torch.Tensor,  # (C,)
+    bias: torch.Tensor,  # (C,)
     eps: float = 1e-5,
-) -> torch.Tensor: # (B, T, C)
+) -> torch.Tensor:  # (B, T, C)
 
     # flatten to 2D (B*T, C)
-    orig_shape = x.shape # (B, T, C)
+    orig_shape = x.shape  # (B, T, C)
     x_flatten = x.reshape(-1, x.shape[-1])
     residual_flatten = residual.reshape(-1, residual.shape[-1])
-    n_rows, n_cols = x_flatten.shape # (B*T, C)
+    n_rows, n_cols = x_flatten.shape  # (B*T, C)
 
     out = torch.empty_like(x_flatten)
 
@@ -58,14 +63,18 @@ def fused_residual_layernorm(
     # launch grid: one program per row
     grid = (n_rows,)
     _fused_residual_layernorm_kernel[grid](
-        x_flatten, residual_flatten, out,
-        weight, bias,
+        x_flatten,
+        residual_flatten,
+        out,
+        weight,
+        bias,
         n_cols,
         eps=eps,
         BLOCK_SIZE=BLOCK_SIZE,
     )
 
     return out.reshape(orig_shape)
+
 
 class FusedResidualLayerNorm(nn.Module):
     def __init__(self, n_embd: int, eps: float = 1e-5):

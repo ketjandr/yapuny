@@ -14,11 +14,16 @@ def _fused_linear_dropout_residual_kernel(
     x_skip_ptr,
     out_ptr,
     seed,
-    M, N, K,
+    M,
+    N,
+    K,
     p_drop,
-    stride_xm, stride_xk,
-    stride_wn, stride_wk,
-    stride_om, stride_on,
+    stride_xm,
+    stride_xk,
+    stride_wn,
+    stride_wk,
+    stride_om,
+    stride_on,
     is_training: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
@@ -55,7 +60,7 @@ def _fused_linear_dropout_residual_kernel(
         # generate a 2d tensor (from 0, 1, ..., N*M - 1)
         dropout_offsets = rm_offsets[:, None] * N + rn_offsets[None, :]
         dropout_mask = tl.rand(seed, dropout_offsets)
-        acc = tl.where(dropout_mask >= p_drop,  acc / (1 - p_drop), 0.0)
+        acc = tl.where(dropout_mask >= p_drop, acc / (1 - p_drop), 0.0)
 
     # residual add: out = x_skip + dropout(acc)
     mask_out = (rm_offsets[:, None] < M) & (rn_offsets[None, :] < N)
@@ -69,10 +74,10 @@ def _fused_linear_dropout_residual_kernel(
 
 
 def fused_linear_dropout_residual(
-    x: torch.Tensor, # input to linear layer (sublayer input)
-    weight: torch.Tensor, # (N, K)
-    bias: torch.Tensor, # (N,)
-    x_skip: torch.Tensor, # original input (skip connection)
+    x: torch.Tensor,  # input to linear layer (sublayer input)
+    weight: torch.Tensor,  # (N, K)
+    bias: torch.Tensor,  # (N,)
+    x_skip: torch.Tensor,  # original input (skip connection)
     p_drop: float = 0.1,
     training: bool = True,
 ) -> torch.Tensor:
@@ -95,13 +100,22 @@ def fused_linear_dropout_residual(
     seed = random.randint(0, 2**31)
 
     _fused_linear_dropout_residual_kernel[grid](
-        x_2d, weight, bias, x_skip_2d, out,
+        x_2d,
+        weight,
+        bias,
+        x_skip_2d,
+        out,
         seed,
-        M, N, K,
+        M,
+        N,
+        K,
         p_drop,
-        x_2d.stride(0), x_2d.stride(1),
-        weight.stride(0), weight.stride(1),
-        out.stride(0), out.stride(1),
+        x_2d.stride(0),
+        x_2d.stride(1),
+        weight.stride(0),
+        weight.stride(1),
+        out.stride(0),
+        out.stride(1),
         is_training=training,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,

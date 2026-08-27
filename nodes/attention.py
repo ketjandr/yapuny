@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from model.types import CacheType
+from shared.types import CacheType
 
 
 class QKVProjection(nn.Module):
@@ -20,8 +20,8 @@ class QKVProjection(nn.Module):
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, T, C = x.shape  # batch, sequence length, embedding dim
 
-        qkv = self.proj(x) # (B, T, 3*C)
-        q, k, v = qkv.split(C, dim=2) # (B, T, C) each
+        qkv = self.proj(x)  # (B, T, 3*C)
+        q, k, v = qkv.split(C, dim=2)  # (B, T, C) each
 
         # reshape to (B, n_head, T, head_dim) for multi-head attention
         q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
@@ -56,7 +56,7 @@ class AttentionScore(nn.Module):
 
     def forward(self, q: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
         # scaled dot-product attention
-        return (q @ k.transpose(-2, -1)) * self.scale # (B, n_head, T, S)
+        return (q @ k.transpose(-2, -1)) * self.scale  # (B, n_head, T, S)
 
 
 class CausalMask(nn.Module):
@@ -86,7 +86,7 @@ class ValueWeightedSum(nn.Module):
     """att_probs @ V - weighted combination of value vectors."""
 
     def forward(self, att: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        return att @ v # (B, n_head, T, head_dim)
+        return att @ v  # (B, n_head, T, head_dim)
 
 
 class OutProjection(nn.Module):
@@ -98,5 +98,7 @@ class OutProjection(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, n_head, T, head_dim = x.shape
-        x = x.transpose(1, 2).contiguous().view(B, T, n_head * head_dim) # merge heads back (B, T, C)
+        x = (
+            x.transpose(1, 2).contiguous().view(B, T, n_head * head_dim)
+        )  # merge heads back (B, T, C)
         return self.proj(x)

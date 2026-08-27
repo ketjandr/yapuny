@@ -11,10 +11,15 @@ def _quantized_linear_w4_kernel(
     scale_ptr,  # (N,), dtype float32
     bias_ptr,  # (N,)
     y_ptr,  # (M, N)
-    M, N, K,
-    stride_xm, stride_xk,
-    stride_wn, stride_wk,
-    stride_ym, stride_yn,
+    M,
+    N,
+    K,
+    stride_xm,
+    stride_xk,
+    stride_wn,
+    stride_wk,
+    stride_ym,
+    stride_yn,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -36,15 +41,15 @@ def _quantized_linear_w4_kernel(
         k_packed_offsets = k_start // 2 + tl.arange(0, BLOCK_K // 2)
         w_q_ptrs = w_q_ptr + rn_offsets[:, None] * stride_wn + k_packed_offsets[None, :] * stride_wk
         mask_w = (rn_offsets[:, None] < N) & (k_packed_offsets[None, :] < K // 2)
-        w_packed_tile = tl.load(w_q_ptrs, mask=mask_w, other=0) # (BLOCK_N, BLOCK_K // 2)
+        w_packed_tile = tl.load(w_q_ptrs, mask=mask_w, other=0)  # (BLOCK_N, BLOCK_K // 2)
 
         # unpack nibbles and sign extend (cast to int8 before subtract to avoid uint8 underflow)
         lo = ((w_packed_tile & 0xF) ^ 8).to(tl.int8) - 8
         hi = (((w_packed_tile >> 4) & 0xF) ^ 8).to(tl.int8) - 8
 
         # dequantize both lo and hi
-        lo_dq = lo.to(tl.float32) * scale[:, None] # (BLOCK_N, BLOCK_K // 2)
-        hi_dq = hi.to(tl.float32) * scale[:, None] # (BLOCK_N, BLOCK_K // 2)
+        lo_dq = lo.to(tl.float32) * scale[:, None]  # (BLOCK_N, BLOCK_K // 2)
+        hi_dq = hi.to(tl.float32) * scale[:, None]  # (BLOCK_N, BLOCK_K // 2)
 
         # load x in two halves
         k_even_offsets = k_start + tl.arange(0, BLOCK_K // 2) * 2
@@ -55,8 +60,8 @@ def _quantized_linear_w4_kernel(
         mask_x_even = (rm_offsets[:, None] < M) & (k_even_offsets[None, :] < K)
         mask_x_odd = (rm_offsets[:, None] < M) & (k_odd_offsets[None, :] < K)
 
-        x_even = tl.load(x_even_ptrs, mask=mask_x_even, other=0.0) # (BLOCK_M, BLOCK_K // 2)
-        x_odd = tl.load(x_odd_ptrs, mask=mask_x_odd, other=0.0) # (BLOCK_M, BLOCK_K // 2)
+        x_even = tl.load(x_even_ptrs, mask=mask_x_even, other=0.0)  # (BLOCK_M, BLOCK_K // 2)
+        x_odd = tl.load(x_odd_ptrs, mask=mask_x_odd, other=0.0)  # (BLOCK_M, BLOCK_K // 2)
 
         # accumulate the even/lo and odd/hi activations/weights
         # two half-width dot products = one full dot product over K
@@ -92,11 +97,20 @@ def quantized_linear_w4(
     grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
 
     _quantized_linear_w4_kernel[grid](
-        x_2d, w_q, scale, bias, y,
-        M, N, K,
-        x_2d.stride(0), x_2d.stride(1),
-        w_q.stride(0), w_q.stride(1),
-        y.stride(0), y.stride(1),
+        x_2d,
+        w_q,
+        scale,
+        bias,
+        y,
+        M,
+        N,
+        K,
+        x_2d.stride(0),
+        x_2d.stride(1),
+        w_q.stride(0),
+        w_q.stride(1),
+        y.stride(0),
+        y.stride(1),
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
         BLOCK_K=BLOCK_K,

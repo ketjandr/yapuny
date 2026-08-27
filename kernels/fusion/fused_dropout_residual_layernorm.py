@@ -54,10 +54,10 @@ def _fused_dropout_residual_layernorm_kernel(
 
 
 def fused_dropout_residual_layernorm(
-    x: torch.Tensor, # original input
-    residual: torch.Tensor, # sublayer output
-    weight: torch.Tensor, # (C,) layernorm weight
-    bias: torch.Tensor, # (C,) layernorm bias
+    x: torch.Tensor,  # original input
+    residual: torch.Tensor,  # sublayer output
+    weight: torch.Tensor,  # (C,) layernorm weight
+    bias: torch.Tensor,  # (C,) layernorm bias
     p_drop: float = 0.1,
     training: bool = True,
     eps: float = 1e-5,
@@ -74,9 +74,15 @@ def fused_dropout_residual_layernorm(
     seed = random.randint(0, 2**31)
 
     _fused_dropout_residual_layernorm_kernel[grid](
-        x_flat, residual_flat, out,
-        weight, bias,
-        seed, n_rows, n_cols, p_drop,
+        x_flat,
+        residual_flat,
+        out,
+        weight,
+        bias,
+        seed,
+        n_rows,
+        n_cols,
+        p_drop,
         eps=eps,
         is_training=training,
         BLOCK_SIZE=BLOCK_SIZE,

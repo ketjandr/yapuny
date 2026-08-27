@@ -33,19 +33,13 @@ class TestCorrectness:
     def test_eval_matches_pytorch(self, setup):
         """With training=False, dropout is identity so output is exact."""
         x, weight, bias, x_skip = setup
-        expected = vanilla_linear_dropout_residual(
-            x, weight, bias, x_skip, P_DROP, training=False
-        )
-        actual = fused_linear_dropout_residual(
-            x, weight, bias, x_skip, P_DROP, training=False
-        )
+        expected = vanilla_linear_dropout_residual(x, weight, bias, x_skip, P_DROP, training=False)
+        actual = fused_linear_dropout_residual(x, weight, bias, x_skip, P_DROP, training=False)
         torch.testing.assert_close(actual, expected, atol=5e-2, rtol=5e-2)
 
     def test_output_shape(self, setup):
         x, weight, bias, x_skip = setup
-        out = fused_linear_dropout_residual(
-            x, weight, bias, x_skip, P_DROP, training=True
-        )
+        out = fused_linear_dropout_residual(x, weight, bias, x_skip, P_DROP, training=True)
         assert out.shape == (B, T, N)
 
     def test_2d_input(self, setup):
@@ -55,9 +49,7 @@ class TestCorrectness:
         expected = vanilla_linear_dropout_residual(
             x_2d, weight, bias, skip_2d, P_DROP, training=False
         )
-        actual = fused_linear_dropout_residual(
-            x_2d, weight, bias, skip_2d, P_DROP, training=False
-        )
+        actual = fused_linear_dropout_residual(x_2d, weight, bias, skip_2d, P_DROP, training=False)
         torch.testing.assert_close(actual, expected, atol=5e-2, rtol=5e-2)
 
     def test_train_some_elements_differ(self, setup):
@@ -77,9 +69,7 @@ class TestCorrectness:
         weight = torch.eye(C, device=DEVICE)  # identity matmul (N=C)
         bias = torch.zeros(C, device=DEVICE)
         x_skip = torch.zeros(1, 1, C, device=DEVICE)
-        out = fused_linear_dropout_residual(
-            x, weight, bias, x_skip, p_drop=P_DROP, training=True
-        )
+        out = fused_linear_dropout_residual(x, weight, bias, x_skip, p_drop=P_DROP, training=True)
         # x_skip=0, identity matmul, input=1 → out = dropout(1)
         n_zero = (out.abs() < 1e-6).sum().item()
         drop_rate = n_zero / out.numel()
@@ -104,9 +94,7 @@ class TestBenchmark:
 
         def run_fused():
             torch.cuda.synchronize()
-            out = fused_linear_dropout_residual(
-                x, weight, bias, x_skip, P_DROP, training=True
-            )
+            out = fused_linear_dropout_residual(x, weight, bias, x_skip, P_DROP, training=True)
             torch.cuda.synchronize()
             return out
 
@@ -121,9 +109,7 @@ class TestBenchmark:
 
         def run_vanilla():
             torch.cuda.synchronize()
-            out = vanilla_linear_dropout_residual(
-                x, weight, bias, x_skip, P_DROP, training=True
-            )
+            out = vanilla_linear_dropout_residual(x, weight, bias, x_skip, P_DROP, training=True)
             torch.cuda.synchronize()
             return out
 

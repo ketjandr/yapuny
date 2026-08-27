@@ -81,7 +81,9 @@ class TestAccuracy:
         w_dq = dequantize_weights_int8(w_q, scale)
         max_err = (weight - w_dq).abs().max().item()
         max_scale = scale.max().item()
-        assert max_err < max_scale / 2 + 1e-6, f"max error {max_err} exceeds scale/2 {max_scale/2}"
+        assert max_err < max_scale / 2 + 1e-6, (
+            f"max error {max_err} exceeds scale/2 {max_scale / 2}"
+        )
 
     def test_w8_vs_fp32_relative_error(self, setup):
         x, weight, bias = setup

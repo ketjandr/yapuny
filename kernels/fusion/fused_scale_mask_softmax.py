@@ -31,18 +31,19 @@ def _fused_scale_mask_softmax_kernel(
 
     # safe "shifted" softmax
     row_max = tl.max(scores, axis=0)
-    scores_minus_max = scores - row_max # shift so we don't overflow
+    scores_minus_max = scores - row_max  # shift so we don't overflow
     numerator = tl.exp(scores_minus_max)
     denominator = tl.sum(numerator)
     out = numerator / denominator
 
     tl.store(out_ptr + ptr_offsets, out, mask=mask)
 
+
 def fused_scale_mask_softmax(
-    scores: torch.Tensor, # (B, n_head, T, T_k) - raw Q@K^T
-    mask: torch.Tensor, # (1, 1, T, T_k) or (T, T_k) - causal mask (1=keep, 0=mask)
-    scale: float, # 1/sqrt(head_dim)
-) -> torch.Tensor: # (B, n_head, T, T_k) - softmax probabilities
+    scores: torch.Tensor,  # (B, n_head, T, T_k) - raw Q@K^T
+    mask: torch.Tensor,  # (1, 1, T, T_k) or (T, T_k) - causal mask (1=keep, 0=mask)
+    scale: float,  # 1/sqrt(head_dim)
+) -> torch.Tensor:  # (B, n_head, T, T_k) - softmax probabilities
     orig_shape = scores.shape
     B, n_head, T, T_k = orig_shape
 
@@ -61,7 +62,9 @@ def fused_scale_mask_softmax(
     # launch grid: one program per row
     grid = (n_rows,)
     _fused_scale_mask_softmax_kernel[grid](
-        scores_2d, mask_2d, out,
+        scores_2d,
+        mask_2d,
+        out,
         scale,
         T,
         T_k,
@@ -74,7 +77,7 @@ def fused_scale_mask_softmax(
 class FusedScaleMaskSoftmax(nn.Module):
     def __init__(self, head_dim: int):
         super().__init__()
-        self.scale = 1.0 / (head_dim ** 0.5)
+        self.scale = 1.0 / (head_dim**0.5)
 
     def forward(self, scores: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         return fused_scale_mask_softmax(scores, mask, self.scale)

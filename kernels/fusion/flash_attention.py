@@ -10,10 +10,22 @@ def _flash_attention_kernel(
     k_ptr,
     v_ptr,
     out_ptr,
-    stride_qb, stride_qh, stride_qm, stride_qk,
-    stride_kb, stride_kh, stride_kn, stride_kk,
-    stride_vb, stride_vh, stride_vn, stride_vk,
-    stride_ob, stride_oh, stride_om, stride_ok,
+    stride_qb,
+    stride_qh,
+    stride_qm,
+    stride_qk,
+    stride_kb,
+    stride_kh,
+    stride_kn,
+    stride_kk,
+    stride_vb,
+    stride_vh,
+    stride_vn,
+    stride_vk,
+    stride_ob,
+    stride_oh,
+    stride_om,
+    stride_ok,
     n_heads,
     seq_len,
     scale,
@@ -22,7 +34,7 @@ def _flash_attention_kernel(
     BLOCK_N: tl.constexpr,  # block size for K/V (cols)
     HEAD_DIM: tl.constexpr,  # d_k (must be power of 2)
 ):
-    pid_m = tl.program_id(0)   # which Q block
+    pid_m = tl.program_id(0)  # which Q block
     pid_bh = tl.program_id(1)  # which (batch, head), flattened B*H
     # decompose flattened (batch, head) index
     batch_idx = pid_bh // n_heads
@@ -41,12 +53,12 @@ def _flash_attention_kernel(
     # load q tensor tile
     q_ptrs = q_base + qm_offsets[:, None] * stride_qm + dk_offsets[None, :] * stride_qk
     mask_q = qm_offsets[:, None] < seq_len
-    q_tile = tl.load(q_ptrs, mask=mask_q, other=0.0) # (BLOCK_M, HEAD_DIM)
+    q_tile = tl.load(q_ptrs, mask=mask_q, other=0.0)  # (BLOCK_M, HEAD_DIM)
 
     # initialize accumulated softmax numerator and running max/sum
     acc = tl.zeros((BLOCK_M, HEAD_DIM), dtype=tl.float32)
-    m = tl.full((BLOCK_M,), value=float("-inf"), dtype=tl.float32) # running row-wise max
-    l = tl.zeros((BLOCK_M,), dtype=tl.float32) # running row-wise sum
+    m = tl.full((BLOCK_M,), value=float("-inf"), dtype=tl.float32)  # running row-wise max
+    l = tl.zeros((BLOCK_M,), dtype=tl.float32)  # running row-wise sum
 
     # tiled attention matrix computation
     for j in range(tl.cdiv(seq_len, BLOCK_N)):
@@ -55,7 +67,7 @@ def _flash_attention_kernel(
         # load k tensor tile
         k_ptrs = k_base + kn_offsets[:, None] * stride_kn + dk_offsets[None, :] * stride_kk
         mask_k = kn_offsets[:, None] < seq_len
-        k_tile = tl.load(k_ptrs, mask=mask_k, other=0.0) # (BLOCK_N, HEAD_DIM)
+        k_tile = tl.load(k_ptrs, mask=mask_k, other=0.0)  # (BLOCK_N, HEAD_DIM)
 
         s_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
 
@@ -68,13 +80,13 @@ def _flash_attention_kernel(
         vn_offsets = kn_offsets
         mask_v = mask_k
         v_ptrs = v_base + vn_offsets[:, None] * stride_vn + dk_offsets[None, :] * stride_vk
-        v_tile = tl.load(v_ptrs, mask=mask_v, other=0.0) # (BLOCK_N, HEAD_DIM)
+        v_tile = tl.load(v_ptrs, mask=mask_v, other=0.0)  # (BLOCK_N, HEAD_DIM)
 
         # online softmax update
-        m_new = tl.maximum(m, tl.max(s_tile, axis=1)) # new running max
+        m_new = tl.maximum(m, tl.max(s_tile, axis=1))  # new running max
         correction = tl.exp(m - m_new)
-        numerator = tl.exp(s_tile - m_new[:, None]) # (BLOCK_M, BLOCK_N)
-        l_new = correction * l + tl.sum(numerator, axis=1) # new running sum
+        numerator = tl.exp(s_tile - m_new[:, None])  # (BLOCK_M, BLOCK_N)
+        l_new = correction * l + tl.sum(numerator, axis=1)  # new running sum
         acc = correction[:, None] * acc + tl.dot(numerator, v_tile)
         m = m_new
         l = l_new
@@ -97,7 +109,7 @@ def flash_attention(
     is_causal: bool = True,
 ) -> torch.Tensor:
     B, H, T, D = q.shape
-    scale = D ** -0.5
+    scale = D**-0.5
 
     out = torch.empty_like(q)
 
@@ -111,11 +123,26 @@ def flash_attention(
     grid = (triton.cdiv(T, BLOCK_M), B * H)
 
     _flash_attention_kernel[grid](
-        q, k, v, out,
-        q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-        k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-        v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-        out.stride(0), out.stride(1), out.stride(2), out.stride(3),
+        q,
+        k,
+        v,
+        out,
+        q.stride(0),
+        q.stride(1),
+        q.stride(2),
+        q.stride(3),
+        k.stride(0),
+        k.stride(1),
+        k.stride(2),
+        k.stride(3),
+        v.stride(0),
+        v.stride(1),
+        v.stride(2),
+        v.stride(3),
+        out.stride(0),
+        out.stride(1),
+        out.stride(2),
+        out.stride(3),
         n_heads=H,
         seq_len=T,
         scale=scale,

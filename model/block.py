@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 
 from model.config import GPTConfig
-from model.types import CacheType
 from nodes.attention import (
     AttentionScore,
     CausalMask,
@@ -16,6 +15,7 @@ from nodes.dropout import Dropout
 from nodes.mlp import MLPActivation, MLPDown, MLPUp
 from nodes.normalization import LayerNorm
 from nodes.residual import ResidualAdd
+from shared.types import CacheType
 
 
 class Block(nn.Module):

@@ -35,8 +35,8 @@ def _fused_dropout_residual_kernel(
 
 
 def fused_dropout_residual(
-    x: torch.Tensor, # original input
-    residual: torch.Tensor, # sublayer output (dropout applied to this)
+    x: torch.Tensor,  # original input
+    residual: torch.Tensor,  # sublayer output (dropout applied to this)
     p_drop: float = 0.1,
     training: bool = True,
 ) -> torch.Tensor:
@@ -49,8 +49,12 @@ def fused_dropout_residual(
     seed = random.randint(0, 2**31)
 
     _fused_dropout_residual_kernel[grid](
-        x, residual, out,
-        seed, n_elements, p_drop,
+        x,
+        residual,
+        out,
+        seed,
+        n_elements,
+        p_drop,
         is_training=training,
         BLOCK_SIZE=BLOCK_SIZE,
     )

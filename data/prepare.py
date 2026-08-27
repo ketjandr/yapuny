@@ -11,6 +11,7 @@ TRAIN_BIN = OUT_DIR / "train.bin"
 VAL_BIN = OUT_DIR / "val.bin"
 VAL_FRACTION = 0.1  # last 10% of the corpus held out for validation
 
+
 def prepare(
     corpus_path: Path = CORPUS_PATH,
     tokenizer_path: Path = TOKENIZER_PATH,
@@ -51,6 +52,7 @@ def prepare(
 
     print(f"Train: {len(train_arr):,} tokens -> {TRAIN_BIN}")
     print(f"Val:   {len(val_arr):,} tokens -> {VAL_BIN}")
+
 
 if __name__ == "__main__":
     prepare()
