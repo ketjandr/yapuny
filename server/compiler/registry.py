@@ -135,12 +135,5 @@ NODE_REGISTRY: dict[str, NodeDef] = {
 def get_build_kwargs(node_type: str, meta: dict) -> dict:
     """Extract constructor kwargs from graph meta for a given node type."""
     node_def = NODE_REGISTRY[node_type]
-    kwargs = {}
-    for arg in node_def.build_args:
-        if arg == "head_dim":
-            kwargs["head_dim"] = meta["n_embd"] // meta["n_head"]
-        elif arg == "dropout":
-            kwargs["p"] = meta["dropout"]
-        else:
-            kwargs[arg] = meta[arg]
-    return kwargs
+    derived = {**meta, "head_dim": meta["n_embd"] // meta["n_head"]}
+    return {arg: derived[arg] for arg in node_def.build_args}

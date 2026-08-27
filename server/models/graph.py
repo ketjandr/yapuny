@@ -43,7 +43,7 @@ class GraphSpec:
     meta: GraphMeta = field(default_factory=GraphMeta)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "GraphSpec":
+    def from_dict(cls, data: dict) -> GraphSpec:
         nodes = [NodeSpec(**n) for n in data["nodes"]]
         edges = [EdgeSpec(**e) for e in data["edges"]]
         fusion_groups = [FusionGroup(**fg) for fg in data.get("fusion_groups", [])]
