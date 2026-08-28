@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile
 
 from worker.worker import Worker
 
@@ -21,6 +21,33 @@ def load_graph(graph_id: str):
     if graph_id not in _graphs:
         raise HTTPException(status_code=404, detail="graph not found")
     return _graphs[graph_id]
+
+
+@router.post("/data/upload")
+async def upload_corpus(file: UploadFile):
+    if not file.filename.endswith(".txt"):
+        raise HTTPException(status_code=400, detail="only .txt files accepted")
+
+    content = await file.read()
+    result = worker.upload_corpus(content, file.filename)
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
+
+
+@router.post("/data/prepare")
+def prepare_data(request: dict = {}):
+    vocab_size = request.get("vocab_size", 8000)
+    val_fraction = request.get("val_fraction", 0.1)
+
+    result = worker.prepare_data(vocab_size=vocab_size, val_fraction=val_fraction)
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
 
 
 @router.post("/compile")
@@ -55,4 +82,44 @@ def generate(request: dict):
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
 
+    return result
+
+
+@router.post("/train")
+def train(request: dict, background_tasks: BackgroundTasks):
+    max_steps = request.get("max_steps", 2000)
+    batch_size = request.get("batch_size", 32)
+    learning_rate = request.get("learning_rate", 3e-4)
+    eval_interval = request.get("eval_interval", 200)
+    eval_iters = request.get("eval_iters", 50)
+    checkpoint_path = request.get("checkpoint_path")
+
+    if worker.model is None:
+        raise HTTPException(status_code=400, detail="no model compiled")
+    if worker.training:
+        raise HTTPException(status_code=409, detail="training already in progress")
+
+    background_tasks.add_task(
+        worker.train,
+        max_steps=max_steps,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        eval_interval=eval_interval,
+        eval_iters=eval_iters,
+        checkpoint_path=checkpoint_path,
+    )
+
+    return {"status": "started", "max_steps": max_steps}
+
+
+@router.get("/train/status")
+def train_status():
+    return worker.get_train_status()
+
+
+@router.post("/train/stop")
+def stop_training():
+    result = worker.stop_training()
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
     return result

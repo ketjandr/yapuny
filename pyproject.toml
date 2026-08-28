@@ -6,6 +6,9 @@ dependencies = [
     "torch",
     "numpy",
     "tokenizers",
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
 ]
 
 [project.optional-dependencies]
@@ -18,7 +21,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["model", "nodes", "kernels", "kernels.fusion", "kernels.quantization", "data", "tests", "tests.fusion", "tests.quantization"]
+packages = ["model", "nodes", "shared", "kernels", "kernels.fusion", "kernels.quantization", "data", "tests", "tests.fusion", "tests.quantization", "server", "server.compiler", "server.api", "server.models", "worker"]
 
 [tool.ruff]
 line-length = 100
