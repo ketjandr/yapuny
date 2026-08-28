@@ -85,6 +85,21 @@ def generate(request: dict):
     return result
 
 
+@router.post("/decode")
+def decode_tokens(request: dict):
+    token_ids = request.get("token_ids", [])
+
+    if not token_ids:
+        raise HTTPException(status_code=400, detail="token_ids required")
+
+    result = worker.decode_tokens(token_ids)
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
+
+
 @router.post("/train")
 def train(request: dict, background_tasks: BackgroundTasks):
     max_steps = request.get("max_steps", 2000)

@@ -6,7 +6,9 @@ import numpy as np
 import torch
 
 from data.tokenizer import (
+    decode,
     encode,
+    load_tokenizer,
     save_tokenizer,
     train_tokenizer,
 )
@@ -227,3 +229,11 @@ class Worker:
             tokens.append(next_id.item())
 
         return {"tokens": tokens}
+
+    def decode_tokens(self, token_ids: list[int]):
+        if not TOKENIZER_PATH.exists():
+            return {"error": "no tokenizer found - prepare data first"}
+
+        tok = load_tokenizer(TOKENIZER_PATH)
+        text = decode(tok, token_ids)
+        return {"text": text}
