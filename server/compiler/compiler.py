@@ -1,4 +1,3 @@
-from collections import defaultdict
 from dataclasses import asdict
 
 import torch
@@ -7,6 +6,7 @@ from torch.nn import functional as F
 
 from server.compiler.fusion_registry import apply_fusion
 from server.compiler.node_registry import NODE_REGISTRY, get_build_kwargs
+from server.compiler.utils import topo_sort
 from server.compiler.validator import GraphValidator
 from server.models.graph import GraphSpec
 
@@ -120,7 +120,7 @@ class GraphCompiler:
         edges = [(e.from_node, e.from_port, e.to_node, e.to_port) for e in graph.edges]
 
         # topological sort
-        topo_order = self._topo_sort(graph)
+        topo_order = topo_sort(graph)
 
         # build output port mapping for each node
         node_outputs = {node.id: list(NODE_REGISTRY[node.type].outputs) for node in graph.nodes}
@@ -139,46 +139,6 @@ class GraphCompiler:
         model.apply(self._init_weights)
 
         return model
-
-    def _topo_sort(self, graph: GraphSpec) -> list[str]:
-        # build an adjacency list (unidirectional)
-        adj = defaultdict(list)
-        # in_degree: how many incoming edges (dependencies) a node has
-        in_degree = defaultdict(int)
-        node_ids = [n.id for n in graph.nodes]
-
-        # initialize all nodes to 0 incoming edges
-        for nid in node_ids:
-            in_degree[nid] = 0
-
-        # count incoming edges for each node
-        for edge in graph.edges:
-            if edge.from_node == "_input":
-                continue
-            adj[edge.from_node].append(edge.to_node)
-            in_degree[edge.to_node] += 1
-
-        # start with nodes that have no dependencies (in_degree == 0)
-        # invariant: queue always contains nodes with in_degree == 0
-        queue = [nid for nid in node_ids if in_degree[nid] == 0]
-        order = []
-
-        while queue:
-            # pick next ready node (all its inputs are already processed)
-            node = queue.pop(0)
-            order.append(node)
-            # "remove" this node by decrementing its neighbors' in_degree
-            for neighbor in adj[node]:
-                in_degree[neighbor] -= 1
-                # neighbor has no more unprocessed dependencies, it's ready
-                if in_degree[neighbor] == 0:
-                    queue.append(neighbor)
-
-        # if we couldn't order all nodes, there's a cycle
-        if len(order) != len(node_ids):
-            raise ValueError("cycle detected during topological sort")
-
-        return order
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):

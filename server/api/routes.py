@@ -95,16 +95,15 @@ def fusion_available():
 
 @router.post("/fusion/suggest")
 def suggest_fusions(graph_data: dict):
-    from server.compiler.compiler import GraphCompiler
     from server.compiler.fusion_registry import FUSION_AVAILABLE, detect_fusion_groups
+    from server.compiler.utils import topo_sort
     from server.models.graph import GraphSpec
 
     if not FUSION_AVAILABLE:
         return {"available": False, "suggestions": []}
 
     graph = GraphSpec.from_dict(graph_data)
-    compiler = GraphCompiler()
-    topo_order = compiler._topo_sort(graph)
+    topo_order = topo_sort(graph)
     node_types = {n.id: n.type for n in graph.nodes}
     edges = [(e.from_node, e.from_port, e.to_node, e.to_port) for e in graph.edges]
 

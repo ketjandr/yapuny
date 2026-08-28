@@ -3,9 +3,9 @@ import torch.nn as nn
 
 
 class Dropout(nn.Module):
-    def __init__(self, dropout: float):
+    def __init__(self, p_drop: float):
         super().__init__()
-        self.drop = nn.Dropout(dropout)
+        self.drop = nn.Dropout(p_drop)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.drop(x)

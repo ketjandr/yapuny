@@ -22,7 +22,7 @@ class FusionDef:
     cls: type
     inputs: list[str]
     outputs: list[str]
-    build_args: list[str]
+    build_args: dict[str, str]  # param_name -> expression evaluated against meta
 
 
 if FUSION_AVAILABLE:
@@ -32,49 +32,49 @@ if FUSION_AVAILABLE:
             cls=FusedResidualLayerNorm,
             inputs=["x", "residual"],
             outputs=["out"],
-            build_args=["n_embd"],
+            build_args={"n_embd": "n_embd"},
         ),
         FusionDef(
             pattern=("attention_score", "causal_mask", "softmax"),
             cls=FusedScaleMaskSoftmax,
             inputs=["q", "k"],
             outputs=["out"],
-            build_args=["head_dim"],
+            build_args={"head_dim": "n_embd // n_head"},
         ),
         FusionDef(
             pattern=("mlp_up", "mlp_activation"),
             cls=FusedLinearGELU,
             inputs=["x"],
             outputs=["out"],
-            build_args=["n_embd"],
+            build_args={"in_features": "n_embd", "out_features": "4 * n_embd"},
         ),
         FusionDef(
             pattern=("dropout", "residual_add"),
             cls=FusedDropoutResidual,
             inputs=["x", "residual"],
             outputs=["out"],
-            build_args=["dropout"],
+            build_args={"p_drop": "dropout"},
         ),
         FusionDef(
             pattern=("mlp_down", "dropout"),
             cls=FusedLinearDropout,
             inputs=["x"],
             outputs=["out"],
-            build_args=["n_embd", "dropout"],
+            build_args={"in_features": "4 * n_embd", "out_features": "n_embd", "p_drop": "dropout"},
         ),
         FusionDef(
             pattern=("dropout", "residual_add", "layernorm"),
             cls=FusedDropoutResidualLayerNorm,
             inputs=["x", "residual"],
             outputs=["out"],
-            build_args=["n_embd", "dropout"],
+            build_args={"n_embd": "n_embd", "p_drop": "dropout"},
         ),
         FusionDef(
             pattern=("mlp_down", "dropout", "residual_add"),
             cls=FusedLinearDropoutResidual,
             inputs=["x", "residual"],
             outputs=["out"],
-            build_args=["n_embd", "dropout"],
+            build_args={"in_features": "4 * n_embd", "out_features": "n_embd", "p_drop": "dropout"},
         ),
     ]
 else:
@@ -174,25 +174,9 @@ def apply_fusion(
         last_node = chain[-1]
 
         # build kwargs for the fused kernel
-        derived = {**meta, "head_dim": meta["n_embd"] // meta["n_head"]}
-        kwargs = {arg: derived[arg] for arg in fdef.build_args}
+        from server.compiler.utils import eval_build_args
 
-        # special handling for linear-based fusions that need in/out features
-        if hasattr(fdef.cls, '__init__'):
-            import inspect
-            sig = inspect.signature(fdef.cls.__init__)
-            params = list(sig.parameters.keys())
-            if 'in_features' in params:
-                kwargs['in_features'] = meta['n_embd']
-            if 'out_features' in params:
-                # mlp_up expands 4x, mlp_down contracts back
-                if 'mlp_up' in fdef.pattern:
-                    kwargs['out_features'] = 4 * meta['n_embd']
-                else:
-                    kwargs['out_features'] = meta['n_embd']
-            if 'p_drop' in params:
-                kwargs['p_drop'] = meta.get('dropout', 0.1)
-                kwargs.pop('dropout', None)
+        kwargs = eval_build_args(fdef.build_args, meta)
 
         # instantiate fused module
         new_modules[fused_id] = fdef.cls(**kwargs)
