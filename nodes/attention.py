@@ -68,13 +68,13 @@ class CausalMask(nn.Module):
         mask = torch.tril(torch.ones(block_size, block_size))
         self.register_buffer("mask", mask.view(1, 1, block_size, block_size))
 
-    def forward(self, att: torch.Tensor) -> torch.Tensor:
-        T = att.shape[2]
-        S = att.shape[3]
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        T = x.shape[2]
+        S = x.shape[3]
         # masking only happens when T > 1 (e.g. when cache is None)
         if T > 1:
-            att = att.masked_fill(self.mask[:, :, :T, :S] == 0, float("-inf"))
-        return att
+            x = x.masked_fill(self.mask[:, :, :T, :S] == 0, float("-inf"))
+        return x
 
 
 class Softmax(nn.Module):

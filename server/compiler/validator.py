@@ -58,9 +58,9 @@ class GraphValidator:
 
     def _check_cycles(self, graph: GraphSpec, errors: list[str]):
         # build an adjacency list (unidirectional)
-        adjacency_list = defaultdict(list)
+        adj = defaultdict(list)
         for edge in graph.edges:
-            adjacency_list[edge.from_node].append(edge.to_node)
+            adj[edge.from_node].append(edge.to_node)
 
         curr_path = set()  # current path of nodes
         visited = set()  # fully explored nodes
@@ -73,7 +73,7 @@ class GraphValidator:
             curr_path.add(node_id)  # add the current node to the path
 
             # inspect the other to_nodes
-            for to_node_id in adjacency_list[node_id]:
+            for to_node_id in adj[node_id]:
                 if to_node_id in curr_path:
                     return True  # cycle detected
                 if dfs(to_node_id):

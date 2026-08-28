@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 
-from kernels.fusion.flash_attention import FlashAttention
+try:
+    from kernels.fusion.flash_attention import FlashAttention
+except ImportError:
+    FlashAttention = None
 from nodes.attention import (
     AttentionScore,
     CausalMask,
@@ -123,13 +126,15 @@ NODE_REGISTRY: dict[str, NodeDef] = {
         outputs=["out"],
         build_args=["n_embd", "vocab_size"],
     ),
-    "flash_attention": NodeDef(
+}
+
+if FlashAttention is not None:
+    NODE_REGISTRY["flash_attention"] = NodeDef(
         cls=FlashAttention,
         inputs=["q", "k", "v"],
         outputs=["out"],
         build_args=[],
-    ),
-}
+    )
 
 
 def get_build_kwargs(node_type: str, meta: dict) -> dict:

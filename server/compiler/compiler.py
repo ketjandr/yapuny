@@ -38,6 +38,7 @@ class GraphModule(nn.Module):
             start_pos = first_cache[0].shape[2]
         else:
             start_pos = 0
+
         positions = torch.arange(start_pos, start_pos + T, device=idx.device)
 
         # seed graph inputs
@@ -70,9 +71,8 @@ class GraphModule(nn.Module):
                 new_caches[node_id] = new_cache
                 continue
 
-            # call forward with positional args in port order
-            args = [inputs[port] for port in node_def.inputs]
-            result = module(*args)
+            # call forward with kwargs so port names match parameter names
+            result = module(**inputs)
 
             # store outputs
             if isinstance(result, tuple):

@@ -1,0 +1,11 @@
+from fastapi import FastAPI
+
+from server.api.routes import router
+
+app = FastAPI(title="Yapuny", version="0.1.0")
+app.include_router(router)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
