@@ -122,5 +122,14 @@ class FusedLinearDropout(nn.Module):
         nn.init.kaiming_uniform_(self.weight)
         nn.init.zeros_(self.bias)
 
+    def init_weights(self):
+        nn.init.normal_(self.weight, mean=0.0, std=0.02)
+        nn.init.zeros_(self.bias)
+
+    def load_from_nodes(self, nodes: dict):
+        down = nodes["mlp_down"]
+        self.weight.data.copy_(down.fc.weight)
+        self.bias.data.copy_(down.fc.bias)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return fused_linear_dropout(x, self.weight, self.bias, self.p_drop, self.training)

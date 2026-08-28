@@ -114,5 +114,14 @@ class FusedLinearGELU(nn.Module):
         nn.init.kaiming_uniform_(self.weight)
         nn.init.zeros_(self.bias)
 
+    def init_weights(self):
+        nn.init.normal_(self.weight, mean=0.0, std=0.02)
+        nn.init.zeros_(self.bias)
+
+    def load_from_nodes(self, nodes: dict):
+        up = nodes["mlp_up"]
+        self.weight.data.copy_(up.fc.weight)
+        self.bias.data.copy_(up.fc.bias)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return fused_linear_gelu(x, self.weight, self.bias)

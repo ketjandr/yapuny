@@ -147,3 +147,5 @@ class GraphCompiler:
                 nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        elif hasattr(module, "init_weights"):
+            module.init_weights()

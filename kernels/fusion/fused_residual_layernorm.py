@@ -83,5 +83,14 @@ class FusedResidualLayerNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(n_embd))
         self.eps = eps
 
+    def init_weights(self):
+        nn.init.ones_(self.weight)
+        nn.init.zeros_(self.bias)
+
+    def load_from_nodes(self, nodes: dict):
+        ln = nodes["layernorm"]
+        self.weight.data.copy_(ln.norm.weight)
+        self.bias.data.copy_(ln.norm.bias)
+
     def forward(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
         return fused_residual_layernorm(x, residual, self.weight, self.bias, self.eps)
