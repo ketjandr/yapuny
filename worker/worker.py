@@ -127,11 +127,13 @@ class Worker:
                 # eval
                 if step % eval_interval == 0:
                     losses = self._estimate_loss(block_size, batch_size, eval_iters)
-                    self.train_state.update({
-                        "step": step,
-                        "train_loss": losses["train"],
-                        "val_loss": losses["val"],
-                    })
+                    self.train_state.update(
+                        {
+                            "step": step,
+                            "train_loss": losses["train"],
+                            "val_loss": losses["val"],
+                        }
+                    )
 
                 # train step
                 x, y = self._get_batch("train", block_size, batch_size)

@@ -86,10 +86,7 @@ def fusion_available():
 
     return {
         "available": FUSION_AVAILABLE,
-        "patterns": [
-            {"nodes": list(f.pattern), "kernel": f.cls.__name__}
-            for f in FUSION_REGISTRY
-        ],
+        "patterns": [{"nodes": list(f.pattern), "kernel": f.cls.__name__} for f in FUSION_REGISTRY],
     }
 
 
@@ -111,10 +108,7 @@ def suggest_fusions(graph_data: dict):
 
     return {
         "available": True,
-        "suggestions": [
-            {"nodes": nids, "kernel": fdef.cls.__name__}
-            for nids, fdef in groups
-        ],
+        "suggestions": [{"nodes": nids, "kernel": fdef.cls.__name__} for nids, fdef in groups],
     }
 
 

@@ -177,7 +177,7 @@ class GraphValidator:
             for i in range(len(fg.nodes) - 1):
                 if fg.nodes[i + 1] not in successors[fg.nodes[i]]:
                     errors.append(
-                        f"fusion {fg.kernel}: {fg.nodes[i]} -> {fg.nodes[i+1]} not connected"
+                        f"fusion {fg.kernel}: {fg.nodes[i]} -> {fg.nodes[i + 1]} not connected"
                     )
                     break
 
