@@ -50,6 +50,24 @@ def prepare_data(request: dict = {}):
     return result
 
 
+@router.post("/validate")
+def validate_graph(graph_data: dict):
+    from server.compiler.validator import GraphValidator
+    from server.models.graph import GraphSpec
+
+    try:
+        graph = GraphSpec.from_dict(graph_data)
+    except (KeyError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=f"invalid graph format: {e}")
+
+    result = GraphValidator().validate(graph)
+    return {
+        "valid": result.valid,
+        "errors": result.errors,
+        "warnings": result.warnings,
+    }
+
+
 @router.post("/compile")
 def compile_graph(graph_data: dict):
     try:
@@ -60,6 +78,45 @@ def compile_graph(graph_data: dict):
         raise HTTPException(status_code=400, detail=str(e))
 
     return result
+
+
+@router.get("/fusion/available")
+def fusion_available():
+    from server.compiler.fusion_registry import FUSION_AVAILABLE, FUSION_REGISTRY
+
+    return {
+        "available": FUSION_AVAILABLE,
+        "patterns": [
+            {"nodes": list(f.pattern), "kernel": f.cls.__name__}
+            for f in FUSION_REGISTRY
+        ],
+    }
+
+
+@router.post("/fusion/suggest")
+def suggest_fusions(graph_data: dict):
+    from server.compiler.compiler import GraphCompiler
+    from server.compiler.fusion_registry import FUSION_AVAILABLE, detect_fusion_groups
+    from server.models.graph import GraphSpec
+
+    if not FUSION_AVAILABLE:
+        return {"available": False, "suggestions": []}
+
+    graph = GraphSpec.from_dict(graph_data)
+    compiler = GraphCompiler()
+    topo_order = compiler._topo_sort(graph)
+    node_types = {n.id: n.type for n in graph.nodes}
+    edges = [(e.from_node, e.from_port, e.to_node, e.to_port) for e in graph.edges]
+
+    groups = detect_fusion_groups(topo_order, node_types, edges)
+
+    return {
+        "available": True,
+        "suggestions": [
+            {"nodes": nids, "kernel": fdef.cls.__name__}
+            for nids, fdef in groups
+        ],
+    }
 
 
 @router.post("/generate")

@@ -1,7 +1,8 @@
 from collections import defaultdict
 from dataclasses import dataclass
 
-from server.compiler.registry import NODE_REGISTRY
+from server.compiler.fusion_registry import FUSION_BY_KERNEL
+from server.compiler.node_registry import NODE_REGISTRY
 from server.models.graph import GraphSpec
 
 
@@ -41,6 +42,7 @@ class GraphValidator:
         self._check_cycles(graph, errors)
         self._check_dangling_edges(graph, errors)
         self._check_port_connections(graph, errors)
+        self._check_fusion_groups(graph, errors)
         self._check_optional_warnings(graph, warnings)
 
         return ValidationResult(errors=errors, warnings=warnings)
@@ -66,21 +68,21 @@ class GraphValidator:
         visited = set()  # fully explored nodes
 
         # helper to conduct dfs (True means a cycle is present)
-        def dfs(node_id):
-            if node_id in visited:
+        def dfs(nid):
+            if nid in visited:
                 return False
 
-            curr_path.add(node_id)  # add the current node to the path
+            curr_path.add(nid)  # add the current node to the path
 
             # inspect the other to_nodes
-            for to_node_id in adj[node_id]:
-                if to_node_id in curr_path:
+            for to_nid in adj[nid]:
+                if to_nid in curr_path:
                     return True  # cycle detected
-                if dfs(to_node_id):
+                if dfs(to_nid):
                     return True  # cycle detected
 
-            curr_path.discard(node_id)  # remove current node from the path
-            visited.add(node_id)  # remember dfs-ing current node found no cycles
+            curr_path.discard(nid)  # remove current node from the path
+            visited.add(nid)  # remember dfs-ing current node found no cycles
 
             return False
 
@@ -127,6 +129,57 @@ class GraphValidator:
                 )
             if edge.to_port not in to_def.inputs:
                 errors.append(f"node {edge.to_node} ({to_type}) has no input port '{edge.to_port}'")
+
+    def _check_fusion_groups(self, graph: GraphSpec, errors: list[str]):
+        if not graph.fusion_groups:
+            return
+
+        node_types = {n.id: n.type for n in graph.nodes}
+
+        # build successor map for chain connectivity check
+        successors: dict[str, list[str]] = defaultdict(list)
+        for edge in graph.edges:
+            if edge.from_node == "_input":
+                continue
+            successors[edge.from_node].append(edge.to_node)
+
+        for fg in graph.fusion_groups:
+            if fg.kernel not in FUSION_BY_KERNEL:
+                errors.append(f"unknown fusion kernel: {fg.kernel}")
+                continue
+
+            fdef = FUSION_BY_KERNEL[fg.kernel]
+
+            if len(fg.nodes) != len(fdef.pattern):
+                errors.append(
+                    f"fusion {fg.kernel} expects {len(fdef.pattern)} nodes, got {len(fg.nodes)}"
+                )
+                continue
+
+            # check each node type matches the pattern
+            type_mismatch = False
+            for nid, expected_type in zip(fg.nodes, fdef.pattern):
+                actual = node_types.get(nid)
+                if actual is None:
+                    errors.append(f"fusion references unknown node: {nid}")
+                    type_mismatch = True
+                    break
+                if actual != expected_type:
+                    errors.append(
+                        f"fusion {fg.kernel}: node {nid} is {actual}, expected {expected_type}"
+                    )
+                    type_mismatch = True
+                    break
+            if type_mismatch:
+                continue
+
+            # check nodes form a connected chain
+            for i in range(len(fg.nodes) - 1):
+                if fg.nodes[i + 1] not in successors[fg.nodes[i]]:
+                    errors.append(
+                        f"fusion {fg.kernel}: {fg.nodes[i]} -> {fg.nodes[i+1]} not connected"
+                    )
+                    break
 
     def _check_optional_warnings(self, graph: GraphSpec, warnings: list[str]):
         present = {n.type for n in graph.nodes}

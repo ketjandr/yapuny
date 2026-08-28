@@ -5,7 +5,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from server.compiler.registry import NODE_REGISTRY, get_build_kwargs
+from server.compiler.fusion_registry import apply_fusion
+from server.compiler.node_registry import NODE_REGISTRY, get_build_kwargs
 from server.compiler.validator import GraphValidator
 from server.models.graph import GraphSpec
 
@@ -19,6 +20,7 @@ class GraphModule(nn.Module):
         topo_order: list[str],
         edges: list[tuple[str, str, str, str]],  # (from_id, from_port, to_id, to_port)
         node_types: dict[str, str],
+        node_outputs: dict[str, list[str]],
         meta: dict,
     ):
         super().__init__()
@@ -26,6 +28,7 @@ class GraphModule(nn.Module):
         self.topo_order = topo_order
         self.edges = edges
         self.node_types = node_types
+        self.node_outputs = node_outputs
         self.meta = meta
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None, caches=None):
@@ -52,7 +55,6 @@ class GraphModule(nn.Module):
 
         for node_id in self.topo_order:
             node_type = self.node_types[node_id]
-            node_def = NODE_REGISTRY[node_type]
             module = self.node_modules[node_id]
 
             # gather inputs from edges
@@ -74,12 +76,13 @@ class GraphModule(nn.Module):
             # call forward with kwargs so port names match parameter names
             result = module(**inputs)
 
-            # store outputs
-            if isinstance(result, tuple):
-                for port, val in zip(node_def.outputs, result):
+            # store outputs keyed by port name
+            outputs = self.node_outputs[node_id]
+            if isinstance(result, tuple):  # multiple tensor outputs
+                for port, val in zip(outputs, result):
                     values[(node_id, port)] = val
-            else:
-                values[(node_id, node_def.outputs[0])] = result
+            else:  # single tensor output
+                values[(node_id, outputs[0])] = result
 
         # find lm_head output for logits
         lm_head_ids = [nid for nid, nt in self.node_types.items() if nt == "lm_head"]
@@ -119,8 +122,20 @@ class GraphCompiler:
         # topological sort
         topo_order = self._topo_sort(graph)
 
+        # build output port mapping for each node
+        node_outputs = {node.id: list(NODE_REGISTRY[node.type].outputs) for node in graph.nodes}
+
+        # apply user-specified fusion groups (already validated by GraphValidator)
+        if graph.fusion_groups:
+            from server.compiler.fusion_registry import FUSION_BY_KERNEL
+
+            groups = [(fg.nodes, FUSION_BY_KERNEL[fg.kernel]) for fg in graph.fusion_groups]
+            modules, node_types, topo_order, edges, node_outputs = apply_fusion(
+                groups, modules, node_types, topo_order, edges, node_outputs, meta
+            )
+
         # weight init
-        model = GraphModule(modules, topo_order, edges, node_types, meta)
+        model = GraphModule(modules, topo_order, edges, node_types, node_outputs, meta)
         model.apply(self._init_weights)
 
         return model
