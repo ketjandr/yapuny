@@ -141,15 +141,12 @@ class GraphCompiler:
                 if node_state:
                     module.load_state_dict(node_state)
 
-        # apply user-specified fusion groups (already validated by GraphValidator)
         transfer_weights = pretrained_state is not None
-        if graph.fusion_groups:
-            from server.compiler.fusion_registry import FUSION_BY_KERNEL
-
-            groups = [(fg.nodes, FUSION_BY_KERNEL[fg.kernel]) for fg in graph.fusion_groups]
+        resolved_fusions = self.validator.resolve_fusions(graph)
+        if resolved_fusions:
             modules, node_types, topo_order, edges, node_outputs = apply_fusion(
-                groups, modules, node_types, topo_order, edges, node_outputs, meta,
-                transfer_weights=transfer_weights,
+                resolved_fusions, modules, node_types, topo_order, edges,
+                node_outputs, meta, transfer_weights=transfer_weights,
             )
 
         model = GraphModule(modules, topo_order, edges, node_types, node_outputs, meta)

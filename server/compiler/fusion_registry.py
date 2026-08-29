@@ -80,7 +80,7 @@ if FUSION_AVAILABLE:
 else:
     FUSION_REGISTRY = []
 
-FUSION_BY_KERNEL: dict[str, FusionDef] = {f.cls.__name__: f for f in FUSION_REGISTRY}
+FUSION_BY_PATTERN: dict[tuple[str, ...], FusionDef] = {f.pattern: f for f in FUSION_REGISTRY}
 
 
 def detect_fusion_groups(
@@ -110,7 +110,7 @@ def detect_fusion_groups(
     # try longer patterns first (greedy)
     sorted_registry = sorted(FUSION_REGISTRY, key=lambda f: len(f.pattern), reverse=True)
 
-    for start_idx, start_node in enumerate(topo_order):
+    for start_node in topo_order:
         if start_node in fused_nodes:
             continue
 

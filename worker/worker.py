@@ -217,7 +217,7 @@ class Worker:
 
         from copy import deepcopy
 
-        from server.compiler.fusion_registry import FUSION_BY_KERNEL
+        node_types = {n.id: n.type for n in self.graph.nodes}
 
         fused_node_ids = set()
         for fg in self.graph.fusion_groups:
@@ -238,12 +238,12 @@ class Worker:
         # extract trained weights from fused kernels back into unfused nodes
         for fg in self.graph.fusion_groups:
             fused_id = "_fused_" + "_".join(fg.nodes)
-            fdef = FUSION_BY_KERNEL[fg.kernel]
             fused_module = self.model.node_modules[fused_id]
 
-            unfused_nodes = {}
-            for nid, node_type in zip(fg.nodes, fdef.pattern):
-                unfused_nodes[node_type] = unfused_model.node_modules[nid]
+            unfused_nodes = {
+                node_types[nid]: unfused_model.node_modules[nid]
+                for nid in fg.nodes
+            }
 
             if hasattr(fused_module, "save_to_nodes"):
                 fused_module.save_to_nodes(unfused_nodes)

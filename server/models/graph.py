@@ -22,7 +22,6 @@ class EdgeSpec:
 @dataclass
 class FusionGroup:
     nodes: list[str]
-    kernel: str
 
 
 @dataclass
@@ -46,6 +45,8 @@ class GraphSpec:
     def from_dict(cls, data: dict) -> GraphSpec:
         nodes = [NodeSpec(**n) for n in data["nodes"]]
         edges = [EdgeSpec(**e) for e in data["edges"]]
-        fusion_groups = [FusionGroup(**fg) for fg in data.get("fusion_groups", [])]
+        fusion_groups = [
+            FusionGroup(nodes=fg["nodes"]) for fg in data.get("fusion_groups", [])
+        ]
         meta = GraphMeta(**data.get("meta", {}))
         return cls(nodes=nodes, edges=edges, fusion_groups=fusion_groups, meta=meta)

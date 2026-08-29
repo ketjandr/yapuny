@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from collections import defaultdict
 from dataclasses import dataclass
 
-from server.compiler.fusion_registry import FUSION_BY_KERNEL
+from server.compiler.fusion_registry import FUSION_BY_PATTERN, FusionDef
 from server.compiler.node_registry import NODE_REGISTRY
 from server.models.graph import GraphSpec
 
@@ -34,8 +36,8 @@ REQUIRED_NODE_TYPES = {
 
 class GraphValidator:
     def validate(self, graph: GraphSpec) -> ValidationResult:
-        errors = []
-        warnings = []
+        errors: list[str] = []
+        warnings: list[str] = []
 
         self._check_unknown_types(graph, errors)
         self._check_required_nodes(graph, errors)
@@ -46,6 +48,19 @@ class GraphValidator:
         self._check_optional_warnings(graph, warnings)
 
         return ValidationResult(errors=errors, warnings=warnings)
+
+    def resolve_fusions(
+        self, graph: GraphSpec,
+    ) -> list[tuple[list[str], FusionDef]]:
+        """Match fusion groups to registry entries by node type pattern."""
+        node_types = {n.id: n.type for n in graph.nodes}
+        resolved = []
+        for fg in graph.fusion_groups:
+            pattern = tuple(node_types[nid] for nid in fg.nodes)
+            fdef = FUSION_BY_PATTERN.get(pattern)
+            if fdef:
+                resolved.append((fg.nodes, fdef))
+        return resolved
 
     def _check_unknown_types(self, graph: GraphSpec, errors: list[str]):
         for node in graph.nodes:
@@ -148,47 +163,41 @@ class GraphValidator:
         for fg in graph.fusion_groups:
             overlap = seen_nodes & set(fg.nodes)
             if overlap:
+                overlap_str = ", ".join(overlap)
+                label = ", ".join(fg.nodes)
                 errors.append(
-                    f"fusion {fg.kernel}: node(s) {', '.join(overlap)} already in another fusion group"
+                    f"fusion [{label}]: node(s) {overlap_str} already in another fusion group"
                 )
                 continue
             seen_nodes.update(fg.nodes)
 
         for fg in graph.fusion_groups:
-            if fg.kernel not in FUSION_BY_KERNEL:
-                errors.append(f"unknown fusion kernel: {fg.kernel}")
+            # resolve kernel from node type pattern
+            node_pattern = tuple(
+                node_types[nid] for nid in fg.nodes if nid in node_types
+            )
+            if len(node_pattern) != len(fg.nodes):
+                missing = [nid for nid in fg.nodes if nid not in node_types]
+                for nid in missing:
+                    errors.append(f"fusion references unknown node: {nid}")
                 continue
 
-            fdef = FUSION_BY_KERNEL[fg.kernel]
+            matched = FUSION_BY_PATTERN.get(node_pattern)
 
-            if len(fg.nodes) != len(fdef.pattern):
+            if matched is None:
+                types_str = " -> ".join(node_pattern)
                 errors.append(
-                    f"fusion {fg.kernel} expects {len(fdef.pattern)} nodes, got {len(fg.nodes)}"
+                    f"no fusion kernel matches pattern ({types_str})"
                 )
                 continue
 
-            # check each node type matches the pattern
-            type_mismatch = False
-            for nid, expected_type in zip(fg.nodes, fdef.pattern):
-                actual = node_types.get(nid)
-                if actual is None:
-                    errors.append(f"fusion references unknown node: {nid}")
-                    type_mismatch = True
-                    break
-                if actual != expected_type:
-                    errors.append(
-                        f"fusion {fg.kernel}: node {nid} is {actual}, expected {expected_type}"
-                    )
-                    type_mismatch = True
-                    break
-            if type_mismatch:
-                continue
+            kernel_name = matched.cls.__name__
 
             # check nodes form a connected chain
             for i in range(len(fg.nodes) - 1):
                 if fg.nodes[i + 1] not in successors[fg.nodes[i]]:
                     errors.append(
-                        f"fusion {fg.kernel}: {fg.nodes[i]} -> {fg.nodes[i + 1]} not connected"
+                        f"fusion {kernel_name}: {fg.nodes[i]} -> {fg.nodes[i + 1]} not connected"
                     )
                     break
 
