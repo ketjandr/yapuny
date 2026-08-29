@@ -123,5 +123,10 @@ class FusedLinearGELU(nn.Module):
         self.weight.data.copy_(up.fc.weight)
         self.bias.data.copy_(up.fc.bias)
 
+    def save_to_nodes(self, nodes: dict):
+        up = nodes["mlp_up"]
+        up.fc.weight.data.copy_(self.weight)
+        up.fc.bias.data.copy_(self.bias)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return fused_linear_gelu(x, self.weight, self.bias)

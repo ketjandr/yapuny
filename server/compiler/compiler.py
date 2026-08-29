@@ -99,7 +99,9 @@ class GraphCompiler:
     def __init__(self):
         self.validator = GraphValidator()
 
-    def compile(self, graph: GraphSpec) -> GraphModule:
+    def compile(
+        self, graph: GraphSpec, pretrained_state: dict | None = None,
+    ) -> GraphModule:
         result = self.validator.validate(graph)
         if not result.valid:
             raise ValueError(f"invalid graph: {result.errors}")
@@ -125,18 +127,35 @@ class GraphCompiler:
         # build output port mapping for each node
         node_outputs = {node.id: list(NODE_REGISTRY[node.type].outputs) for node in graph.nodes}
 
+        if pretrained_state is not None:
+            # no structural change - load trained weights into freshly instantiated modules
+            # pretrained_state keys are namespaced like "node_modules.b0_mlp_up.fc.weight",
+            # so we strip the prefix to get what each module's load_state_dict expects
+            for node_id, module in modules.items():
+                prefix = f"node_modules.{node_id}."
+                node_state = {
+                    param_name[len(prefix):]: param_tensor
+                    for param_name, param_tensor in pretrained_state.items()
+                    if param_name.startswith(prefix)
+                }
+                if node_state:
+                    module.load_state_dict(node_state)
+
         # apply user-specified fusion groups (already validated by GraphValidator)
+        transfer_weights = pretrained_state is not None
         if graph.fusion_groups:
             from server.compiler.fusion_registry import FUSION_BY_KERNEL
 
             groups = [(fg.nodes, FUSION_BY_KERNEL[fg.kernel]) for fg in graph.fusion_groups]
             modules, node_types, topo_order, edges, node_outputs = apply_fusion(
-                groups, modules, node_types, topo_order, edges, node_outputs, meta
+                groups, modules, node_types, topo_order, edges, node_outputs, meta,
+                transfer_weights=transfer_weights,
             )
 
-        # weight init
         model = GraphModule(modules, topo_order, edges, node_types, node_outputs, meta)
-        model.apply(self._init_weights)
+
+        if pretrained_state is None:
+            model.apply(self._init_weights)
 
         return model
 

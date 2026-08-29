@@ -20,7 +20,7 @@ def setup():
 
 
 def vanilla_dropout_residual(x, residual, p_drop, training):
-    return x + F.dropout(residual, p=p_drop, training=training)
+    return F.dropout(x, p=p_drop, training=training) + residual
 
 
 class TestCorrectness:
@@ -51,19 +51,19 @@ class TestCorrectness:
         assert (diff > 1e-6).any(), "dropout should modify some elements"
 
     def test_train_drop_rate_approx(self, setup):
-        """Check that ~p_drop fraction of residual contributions are zeroed."""
-        x = torch.zeros(1, 1, 100_000, device=DEVICE)
-        residual = torch.ones(1, 1, 100_000, device=DEVICE)
+        """Check that ~p_drop fraction of x (sublayer) contributions are zeroed."""
+        x = torch.ones(1, 1, 100_000, device=DEVICE)
+        residual = torch.zeros(1, 1, 100_000, device=DEVICE)
         out = fused_dropout_residual(x, residual, p_drop=P_DROP, training=True)
-        # with x=0: out = 0 + dropout(ones). Dropped positions = 0, kept = 1/(1-p)
+        # with residual=0: out = dropout(ones) + 0. Dropped positions = 0, kept = 1/(1-p)
         n_zero = (out.abs() < 1e-6).sum().item()
         drop_rate = n_zero / out.numel()
         assert 0.05 < drop_rate < 0.15, f"expected ~10% drop rate, got {drop_rate:.2%}"
 
     def test_train_scaling(self, setup):
         """Kept values should be scaled by 1/(1-p)."""
-        x = torch.zeros(1, 1, 100_000, device=DEVICE)
-        residual = torch.ones(1, 1, 100_000, device=DEVICE)
+        x = torch.ones(1, 1, 100_000, device=DEVICE)
+        residual = torch.zeros(1, 1, 100_000, device=DEVICE)
         out = fused_dropout_residual(x, residual, p_drop=P_DROP, training=True)
         kept = out[out.abs() > 1e-6]
         expected_scale = 1.0 / (1.0 - P_DROP)

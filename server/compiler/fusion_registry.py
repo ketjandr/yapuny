@@ -160,6 +160,7 @@ def apply_fusion(
     edges: list[tuple[str, str, str, str]],
     node_outputs: dict[str, list[str]],
     meta: dict,
+    transfer_weights: bool = False,
 ) -> tuple[dict, dict, list, list, dict]:
     """Replace fused node groups with single fused modules, rewire edges."""
     new_modules = dict(modules)
@@ -171,7 +172,6 @@ def apply_fusion(
     for chain, fdef in groups:
         fused_id = "_fused_" + "_".join(chain)
         first_node = chain[0]
-        last_node = chain[-1]
 
         # build kwargs for the fused kernel
         from server.compiler.utils import eval_build_args
@@ -179,7 +179,16 @@ def apply_fusion(
         kwargs = eval_build_args(fdef.build_args, meta)
 
         # instantiate fused module
-        new_modules[fused_id] = fdef.cls(**kwargs)
+        fused_module = fdef.cls(**kwargs)
+
+        if transfer_weights and hasattr(fused_module, "load_from_nodes"):
+            source_nodes = {
+                node_type: new_modules[nid]
+                for nid, node_type in zip(chain, fdef.pattern)
+            }
+            fused_module.load_from_nodes(source_nodes)
+
+        new_modules[fused_id] = fused_module
         new_types[fused_id] = fused_id
 
         new_outputs[fused_id] = list(fdef.outputs)
@@ -190,22 +199,21 @@ def apply_fusion(
             del new_types[nid]
             del new_outputs[nid]
 
-        # rewire edges: inputs to first node -> inputs to fused node
+        # rewire edges around the fused node
+        chain_set = set(chain)
         rewired_edges = []
         for from_id, from_port, to_id, to_port in new_edges:
-            if to_id == first_node and from_id not in chain:
+            if to_id in chain_set and from_id not in chain_set:
+                # external input -> fused node (e.g. skip connection)
                 rewired_edges.append((from_id, from_port, fused_id, to_port))
-            elif to_id in chain and from_id in chain:
-                continue  # internal edge, drop it
-            elif to_id in chain and from_id not in chain:
-                # external input to a middle/last node (e.g. residual)
-                rewired_edges.append((from_id, from_port, fused_id, to_port))
-            elif from_id == last_node and to_id not in chain:
-                rewired_edges.append((fused_id, "out", to_id, to_port))
-            elif from_id in chain and to_id not in chain:
-                # output from middle node to outside - route through fused
+            elif to_id in chain_set and from_id in chain_set:
+                # internal wiring between fused nodes, handled by the kernel
+                continue
+            elif from_id in chain_set:
+                # fused node output -> downstream node
                 rewired_edges.append((fused_id, "out", to_id, to_port))
             else:
+                # unrelated edge, keep as-is
                 rewired_edges.append((from_id, from_port, to_id, to_port))
 
         new_edges = rewired_edges

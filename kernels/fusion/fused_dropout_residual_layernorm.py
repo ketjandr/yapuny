@@ -27,16 +27,16 @@ def _fused_dropout_residual_layernorm_kernel(
 
     ptr_offsets = pid * n_cols + col_offsets
 
-    residual = tl.load(residual_ptr + ptr_offsets, mask=mask, other=0.0)
+    x = tl.load(x_ptr + ptr_offsets, mask=mask, other=0.0)
 
-    # dropout: perform only during training
+    # dropout on sublayer output
     if is_training:
         dropout_mask = tl.rand(seed, ptr_offsets)
-        residual = tl.where(dropout_mask >= p_drop, residual / (1 - p_drop), 0.0)
+        x = tl.where(dropout_mask >= p_drop, x / (1 - p_drop), 0.0)
 
     # residual add
-    x = tl.load(x_ptr + ptr_offsets, mask=mask, other=0.0)
-    z = x + residual
+    residual = tl.load(residual_ptr + ptr_offsets, mask=mask, other=0.0)
+    z = residual + x
 
     # layernorm
     # calculate normalized embedding from mean and variance
@@ -54,8 +54,8 @@ def _fused_dropout_residual_layernorm_kernel(
 
 
 def fused_dropout_residual_layernorm(
-    x: torch.Tensor,  # original input
-    residual: torch.Tensor,  # sublayer output
+    x: torch.Tensor,  # sublayer output (dropout applied to this)
+    residual: torch.Tensor,  # skip connection
     weight: torch.Tensor,  # (C,) layernorm weight
     bias: torch.Tensor,  # (C,) layernorm bias
     p_drop: float = 0.1,
@@ -107,6 +107,11 @@ class FusedDropoutResidualLayerNorm(nn.Module):
         ln = nodes["layernorm"]
         self.weight.data.copy_(ln.norm.weight)
         self.bias.data.copy_(ln.norm.bias)
+
+    def save_to_nodes(self, nodes: dict):
+        ln = nodes["layernorm"]
+        ln.norm.weight.data.copy_(self.weight)
+        ln.norm.bias.data.copy_(self.bias)
 
     def forward(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
         return fused_dropout_residual_layernorm(

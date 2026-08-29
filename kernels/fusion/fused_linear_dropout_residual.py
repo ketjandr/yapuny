@@ -53,7 +53,7 @@ def _fused_linear_dropout_residual_kernel(
     # add bias
     mask_bias = rn_offsets < N
     bias = tl.load(bias_ptr + rn_offsets, mask=mask_bias, other=0.0)
-    acc += bias[None, :]  # acc is now the residual (sublayer output)
+    acc += bias[None, :]
 
     # dropout
     if is_training:
@@ -74,10 +74,10 @@ def _fused_linear_dropout_residual_kernel(
 
 
 def fused_linear_dropout_residual(
-    x: torch.Tensor,  # input to linear layer (sublayer input)
+    x: torch.Tensor,  # sublayer input (to linear layer)
     weight: torch.Tensor,  # (N, K)
     bias: torch.Tensor,  # (N,)
-    x_skip: torch.Tensor,  # original input (skip connection)
+    residual: torch.Tensor,  # skip connection
     p_drop: float = 0.1,
     training: bool = True,
 ) -> torch.Tensor:
@@ -87,8 +87,7 @@ def fused_linear_dropout_residual(
     M, K = x_2d.shape
     N = weight.shape[0]
 
-    # x_skip must match output shape
-    x_skip_2d = x_skip.reshape(-1, x_skip.shape[-1])
+    residual_2d = residual.reshape(-1, residual.shape[-1])
 
     out = torch.empty((M, N), device=x.device, dtype=x.dtype)
 
@@ -103,7 +102,7 @@ def fused_linear_dropout_residual(
         x_2d,
         weight,
         bias,
-        x_skip_2d,
+        residual_2d,
         out,
         seed,
         M,
@@ -143,7 +142,12 @@ class FusedLinearDropoutResidual(nn.Module):
         self.weight.data.copy_(down.fc.weight)
         self.bias.data.copy_(down.fc.bias)
 
-    def forward(self, x: torch.Tensor, x_skip: torch.Tensor) -> torch.Tensor:
+    def save_to_nodes(self, nodes: dict):
+        down = nodes["mlp_down"]
+        down.fc.weight.data.copy_(self.weight)
+        down.fc.bias.data.copy_(self.bias)
+
+    def forward(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
         return fused_linear_dropout_residual(
-            x, self.weight, self.bias, x_skip, self.p_drop, self.training
+            x, self.weight, self.bias, residual, self.p_drop, self.training
         )

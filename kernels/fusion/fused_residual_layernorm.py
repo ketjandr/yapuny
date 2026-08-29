@@ -43,8 +43,8 @@ def _fused_residual_layernorm_kernel(
 
 
 def fused_residual_layernorm(
-    x: torch.Tensor,  # (B, T, C) or (B*T, C) - original embeddings
-    residual: torch.Tensor,  # (B, T, C) or (B*T, C) - sublayer deltas
+    x: torch.Tensor,  # (B, T, C) or (B*T, C) - sublayer output
+    residual: torch.Tensor,  # (B, T, C) or (B*T, C) - skip connection
     weight: torch.Tensor,  # (C,)
     bias: torch.Tensor,  # (C,)
     eps: float = 1e-5,
@@ -91,6 +91,11 @@ class FusedResidualLayerNorm(nn.Module):
         ln = nodes["layernorm"]
         self.weight.data.copy_(ln.norm.weight)
         self.bias.data.copy_(ln.norm.bias)
+
+    def save_to_nodes(self, nodes: dict):
+        ln = nodes["layernorm"]
+        ln.norm.weight.data.copy_(self.weight)
+        ln.norm.bias.data.copy_(self.bias)
 
     def forward(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
         return fused_residual_layernorm(x, residual, self.weight, self.bias, self.eps)

@@ -131,5 +131,10 @@ class FusedLinearDropout(nn.Module):
         self.weight.data.copy_(down.fc.weight)
         self.bias.data.copy_(down.fc.bias)
 
+    def save_to_nodes(self, nodes: dict):
+        down = nodes["mlp_down"]
+        down.fc.weight.data.copy_(self.weight)
+        down.fc.bias.data.copy_(self.bias)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return fused_linear_dropout(x, self.weight, self.bias, self.p_drop, self.training)

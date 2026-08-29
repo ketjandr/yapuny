@@ -21,23 +21,23 @@ def _fused_dropout_residual_kernel(
     ptr_offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     mask = ptr_offsets < n_elements
 
-    residual = tl.load(residual_ptr + ptr_offsets, mask=mask, other=0.0)
+    x = tl.load(x_ptr + ptr_offsets, mask=mask, other=0.0)
 
-    # dropout: perform only during training
+    # dropout on sublayer output
     if is_training:
         dropout_mask = tl.rand(seed, ptr_offsets)
-        residual = tl.where(dropout_mask >= p_drop, residual / (1 - p_drop), 0.0)
+        x = tl.where(dropout_mask >= p_drop, x / (1 - p_drop), 0.0)
 
     # residual add
-    x = tl.load(x_ptr + ptr_offsets, mask=mask, other=0.0)
-    out = x + residual
+    residual = tl.load(residual_ptr + ptr_offsets, mask=mask, other=0.0)
+    out = residual + x
 
     tl.store(out_ptr + ptr_offsets, out, mask=mask)
 
 
 def fused_dropout_residual(
-    x: torch.Tensor,  # original input
-    residual: torch.Tensor,  # sublayer output (dropout applied to this)
+    x: torch.Tensor,  # sublayer output (dropout applied to this)
+    residual: torch.Tensor,  # skip connection
     p_drop: float = 0.1,
     training: bool = True,
 ) -> torch.Tensor:

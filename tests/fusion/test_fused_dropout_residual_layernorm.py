@@ -26,7 +26,7 @@ def setup():
 
 def vanilla_dropout_residual_layernorm(x, residual, weight, bias, p_drop, training):
     return F.layer_norm(
-        x + F.dropout(residual, p=p_drop, training=training),
+        F.dropout(x, p=p_drop, training=training) + residual,
         [weight.shape[0]],
         weight,
         bias,

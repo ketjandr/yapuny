@@ -13,6 +13,7 @@ from data.tokenizer import (
     train_tokenizer,
 )
 from server.compiler.compiler import GraphCompiler
+from server.compiler.utils import graph_structure_hash
 from server.models.graph import GraphSpec
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -26,6 +27,9 @@ class Worker:
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.compiler = GraphCompiler()
         self.model = None
+        self.graph = None
+        self._unfused_state = None
+        self._structure_hash = None
         self.training = False
         self.train_state = None
 
@@ -84,11 +88,36 @@ class Worker:
         }
 
     def compile_graph(self, graph_data: dict):
-        graph = GraphSpec.from_dict(graph_data)
-        self.model = self.compiler.compile(graph)
+        new_graph = GraphSpec.from_dict(graph_data)
+        # hash of nodes + edges + meta, excluding fusion_groups
+        new_hash = graph_structure_hash(new_graph)
+
+        structure_changed = new_hash != self._structure_hash
+        has_trained_weights = self._unfused_state is not None
+
+        if not structure_changed and has_trained_weights:
+            # only fusion config changed - reuse trained weights
+            result = self._recompile_with_weights(new_graph)
+        else:
+            # structural change (or first compile) - fresh init, must retrain
+            self.graph = new_graph
+            self.model = self.compiler.compile(self.graph)
+            self.model.to(self.device)
+            self.model.eval()
+            self._unfused_state = None
+            result = {"status": "compiled", "weights": "reinitialized"}
+
+        self._structure_hash = new_hash
+        result["device"] = str(self.device)
+        return result
+
+    def _recompile_with_weights(self, new_graph: GraphSpec):
+        # compile with pretrained snapshot - handles fusion + weight transfer internally
+        self.model = self.compiler.compile(new_graph, pretrained_state=self._unfused_state)
         self.model.to(self.device)
         self.model.eval()
-        return {"status": "compiled", "device": str(self.device)}
+        self.graph = new_graph
+        return {"status": "compiled", "weights": "preserved"}
 
     def train(
         self,
@@ -161,6 +190,8 @@ class Worker:
             torch.save({"model": self.model.state_dict()}, path)
             self.train_state["checkpoint"] = str(path)
 
+            self._snapshot_unfused_state()
+
         finally:
             self.training = False
             self.model.eval()
@@ -177,6 +208,47 @@ class Worker:
         if self.train_state is None:
             return {"status": "idle"}
         return self.train_state
+
+    def _snapshot_unfused_state(self):
+        """Save trained weights in unfused form for later fusion toggling."""
+        if not self.graph.fusion_groups:
+            self._unfused_state = self.model.state_dict()
+            return
+
+        from copy import deepcopy
+
+        from server.compiler.fusion_registry import FUSION_BY_KERNEL
+
+        fused_node_ids = set()
+        for fg in self.graph.fusion_groups:
+            fused_node_ids.update(fg.nodes)
+
+        # compile a fresh unfused model to get correct keys and structure
+        unfused_graph = deepcopy(self.graph)
+        unfused_graph.fusion_groups = []
+        unfused_model = self.compiler.compile(unfused_graph)
+
+        # copy trained weights from non-fused nodes
+        for nid in unfused_model.node_modules:
+            if nid not in fused_node_ids:
+                src = self.model.node_modules[nid]
+                dst = unfused_model.node_modules[nid]
+                dst.load_state_dict(src.state_dict())
+
+        # extract trained weights from fused kernels back into unfused nodes
+        for fg in self.graph.fusion_groups:
+            fused_id = "_fused_" + "_".join(fg.nodes)
+            fdef = FUSION_BY_KERNEL[fg.kernel]
+            fused_module = self.model.node_modules[fused_id]
+
+            unfused_nodes = {}
+            for nid, node_type in zip(fg.nodes, fdef.pattern):
+                unfused_nodes[node_type] = unfused_model.node_modules[nid]
+
+            if hasattr(fused_module, "save_to_nodes"):
+                fused_module.save_to_nodes(unfused_nodes)
+
+        self._unfused_state = unfused_model.state_dict()
 
     def _get_batch(self, split: str, block_size: int, batch_size: int):
         path = DATA_DIR / ("train.bin" if split == "train" else "val.bin")

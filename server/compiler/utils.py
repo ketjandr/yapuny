@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
+from dataclasses import asdict
 
 from server.models.graph import GraphSpec
 
@@ -50,3 +53,11 @@ def topo_sort(graph: GraphSpec) -> list[str]:
         raise ValueError("cycle detected during topological sort")
 
     return order
+
+
+def graph_structure_hash(graph: GraphSpec) -> str:
+    nodes = sorted([(n.id, n.type, sorted(n.config.items())) for n in graph.nodes])
+    edges = sorted([(e.from_node, e.from_port, e.to_node, e.to_port) for e in graph.edges])
+    meta = sorted(asdict(graph.meta).items())
+    blob = json.dumps([nodes, edges, meta], default=str).encode()
+    return hashlib.sha256(blob).hexdigest()
