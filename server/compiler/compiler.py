@@ -13,6 +13,15 @@ from server.compiler.validator import GraphValidator
 from server.models.graph import GraphSpec
 
 
+def cache_length(caches: dict | None) -> int | None:
+    """Cached sequence length, or None if the graph has no kv_cache node."""
+    kv = (caches or {}).get("kv")
+    if not kv:
+        return None
+    k, _ = next(iter(kv.values()))
+    return k.shape[2]
+
+
 class GraphModule(nn.Module):
     """A compiled graph - executes nodes in topological order, routing tensors via edges."""
 
@@ -37,12 +46,8 @@ class GraphModule(nn.Module):
         B, T = idx.shape
         values = {}
 
-        # compute position indices
-        if caches is not None and caches.get("kv") is not None:
-            first_cache = next(iter(caches["kv"].values()))
-            start_pos = first_cache[0].shape[2]
-        else:
-            start_pos = 0
+        # position indices continue from whatever is already cached
+        start_pos = cache_length(caches) or 0
 
         positions = torch.arange(start_pos, start_pos + T, device=idx.device)
 

@@ -12,7 +12,7 @@ from data.tokenizer import (
     save_tokenizer,
     train_tokenizer,
 )
-from server.compiler.compiler import GraphCompiler
+from server.compiler.compiler import GraphCompiler, cache_length
 from server.compiler.utils import graph_structure_hash
 from server.models.graph import GraphSpec
 
@@ -275,6 +275,14 @@ class Worker:
         self.model.train()
         return out
 
+    def _sample(self, logits, temperature, top_k):
+        logits = logits[:, -1, :] / temperature
+        if top_k is not None:
+            v, _ = torch.topk(logits, top_k)
+            logits[logits < v[:, [-1]]] = float("-inf")
+        probs = torch.softmax(logits, dim=-1)
+        return torch.multinomial(probs, num_samples=1)
+
     @torch.no_grad()
     def generate(
         self,
@@ -290,20 +298,24 @@ class Worker:
         block_size = self.model.meta["block_size"]
         tokens = []
 
-        for _ in range(max_new_tokens):
-            # truncate to context window
-            idx_cond = idx[:, -block_size:]
-            logits, _, _ = self.model(idx_cond)
-            logits = logits[:, -1, :] / temperature
+        # prefill - whole prompt in one pass, seeds the cache if the graph has one
+        logits, _, caches = self.model(idx[:, -block_size:])
 
-            if top_k is not None:
-                v, _ = torch.topk(logits, top_k)
-                logits[logits < v[:, [-1]]] = float("-inf")
-
-            probs = torch.softmax(logits, dim=-1)
-            next_id = torch.multinomial(probs, num_samples=1)
+        for step in range(max_new_tokens):
+            next_id = self._sample(logits, temperature, top_k)
             idx = torch.cat((idx, next_id), dim=1)
             tokens.append(next_id.item())
+
+            if step == max_new_tokens - 1:
+                break  # have every token - skip the unused final forward
+
+            cached_len = cache_length(caches)
+            if cached_len is not None and cached_len < block_size:
+                # decode - feed only the new token, reuse cached k/v
+                logits, _, caches = self.model(next_id, caches=caches)
+            else:
+                # no kv_cache node, or context window full - recompute the window
+                logits, _, _ = self.model(idx[:, -block_size:])
 
         return {"tokens": tokens}
 
