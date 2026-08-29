@@ -128,13 +128,14 @@ class TestFusionValidation:
         assert not result.valid
         assert any("not connected" in e for e in result.errors)
 
-    def test_three_node_fusion(self, validator, valid_graph_dict):
+    def test_three_node_fusion_with_external_consumer(self, validator, valid_graph_dict):
         valid_graph_dict["fusion_groups"] = [
             {"nodes": ["b0_resid_drop1", "b0_res1", "b0_ln2"]},
         ]
         graph = GraphSpec.from_dict(valid_graph_dict)
         result = validator.validate(graph)
-        assert result.valid
+        assert not result.valid
+        assert any("mid-chain node" in e and "b0_res1" in e for e in result.errors)
 
     def test_multiple_valid_groups(self, validator):
         g = default_gpt_graph(n_layer=2)

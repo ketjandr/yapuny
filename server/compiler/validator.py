@@ -194,12 +194,26 @@ class GraphValidator:
             kernel_name = matched.cls.__name__
 
             # check nodes form a connected chain
+            chain_ok = True
             for i in range(len(fg.nodes) - 1):
                 if fg.nodes[i + 1] not in successors[fg.nodes[i]]:
                     errors.append(
                         f"fusion {kernel_name}: {fg.nodes[i]} -> {fg.nodes[i + 1]} not connected"
                     )
+                    chain_ok = False
                     break
+            if not chain_ok:
+                continue
+
+            # non-final chain nodes must not have external consumers
+            chain_set = set(fg.nodes)
+            for nid in fg.nodes[:-1]:
+                external = [s for s in successors[nid] if s not in chain_set]
+                if external:
+                    errors.append(
+                        f"fusion {kernel_name}: mid-chain node {nid} "
+                        f"has external consumer(s) {', '.join(external)}"
+                    )
 
     def _check_optional_warnings(self, graph: GraphSpec, warnings: list[str]):
         present = {n.type for n in graph.nodes}
