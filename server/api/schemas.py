@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -13,7 +15,7 @@ class NodeSchema(BaseSchema):
     id: str
     type: str
     config: dict = Field(default_factory=dict)
-    quantized: str | None = None
+    quantized: Optional[str] = None
 
 
 class EdgeSchema(BaseSchema):
@@ -62,7 +64,7 @@ class TrainRequest(BaseSchema):
     learning_rate: float = 3e-4
     eval_interval: int = 200
     eval_iters: int = 50
-    checkpoint_path: str | None = None
+    checkpoint_path: Optional[str] = None
 
 
 # -- Generate --
@@ -71,7 +73,7 @@ class GenerateRequest(BaseSchema):
     prompt_ids: list[int]
     max_new_tokens: int = 50
     temperature: float = 1.0
-    top_k: int | None = None
+    top_k: Optional[int] = None
 
 
 class DecodeRequest(BaseSchema):
