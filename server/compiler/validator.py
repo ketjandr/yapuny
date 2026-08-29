@@ -143,6 +143,17 @@ class GraphValidator:
                 continue
             successors[edge.from_node].append(edge.to_node)
 
+        # check for overlapping nodes across fusion groups
+        seen_nodes: set[str] = set()
+        for fg in graph.fusion_groups:
+            overlap = seen_nodes & set(fg.nodes)
+            if overlap:
+                errors.append(
+                    f"fusion {fg.kernel}: node(s) {', '.join(overlap)} already in another fusion group"
+                )
+                continue
+            seen_nodes.update(fg.nodes)
+
         for fg in graph.fusion_groups:
             if fg.kernel not in FUSION_BY_KERNEL:
                 errors.append(f"unknown fusion kernel: {fg.kernel}")
