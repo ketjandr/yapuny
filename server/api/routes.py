@@ -1,5 +1,13 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile
 
+from server.api.schemas import (
+    DecodeRequest,
+    GenerateRequest,
+    GraphRequest,
+    PrepareDataRequest,
+    SaveGraphRequest,
+    TrainRequest,
+)
 from worker.worker import Worker
 
 router = APIRouter(prefix="/api")
@@ -10,8 +18,9 @@ _graphs: dict[str, dict] = {}
 
 
 @router.post("/graph")
-def save_graph(graph_data: dict):
-    graph_id = graph_data.get("id", "default")
+def save_graph(request: SaveGraphRequest):
+    graph_data = request.model_dump()
+    graph_id = request.id
     _graphs[graph_id] = graph_data
     return {"id": graph_id, "status": "saved"}
 
@@ -38,11 +47,10 @@ async def upload_corpus(file: UploadFile):
 
 
 @router.post("/data/prepare")
-def prepare_data(request: dict = {}):
-    vocab_size = request.get("vocab_size", 8000)
-    val_fraction = request.get("val_fraction", 0.1)
-
-    result = worker.prepare_data(vocab_size=vocab_size, val_fraction=val_fraction)
+def prepare_data(request: PrepareDataRequest = PrepareDataRequest()):
+    result = worker.prepare_data(
+        vocab_size=request.vocab_size, val_fraction=request.val_fraction,
+    )
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -51,15 +59,11 @@ def prepare_data(request: dict = {}):
 
 
 @router.post("/validate")
-def validate_graph(graph_data: dict):
+def validate_graph(request: GraphRequest):
     from server.compiler.validator import GraphValidator
     from server.models.graph import GraphSpec
 
-    try:
-        graph = GraphSpec.from_dict(graph_data)
-    except (KeyError, TypeError) as e:
-        raise HTTPException(status_code=400, detail=f"invalid graph format: {e}")
-
+    graph = GraphSpec.from_dict(request.model_dump())
     result = GraphValidator().validate(graph)
     return {
         "valid": result.valid,
@@ -69,11 +73,9 @@ def validate_graph(graph_data: dict):
 
 
 @router.post("/compile")
-def compile_graph(graph_data: dict):
+def compile_graph(request: GraphRequest):
     try:
-        result = worker.compile_graph(graph_data)
-    except (KeyError, TypeError) as e:
-        raise HTTPException(status_code=400, detail=f"invalid graph format: {e}")
+        result = worker.compile_graph(request.model_dump())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -86,12 +88,15 @@ def fusion_available():
 
     return {
         "available": FUSION_AVAILABLE,
-        "patterns": [{"nodes": list(f.pattern), "kernel": f.cls.__name__} for f in FUSION_REGISTRY],
+        "patterns": [
+            {"nodes": list(f.pattern), "kernel": f.cls.__name__}
+            for f in FUSION_REGISTRY
+        ],
     }
 
 
 @router.post("/fusion/suggest")
-def suggest_fusions(graph_data: dict):
+def suggest_fusions(request: GraphRequest):
     from server.compiler.fusion_registry import FUSION_AVAILABLE, detect_fusion_groups
     from server.compiler.utils import topo_sort
     from server.models.graph import GraphSpec
@@ -99,7 +104,7 @@ def suggest_fusions(graph_data: dict):
     if not FUSION_AVAILABLE:
         return {"available": False, "suggestions": []}
 
-    graph = GraphSpec.from_dict(graph_data)
+    graph = GraphSpec.from_dict(request.model_dump())
     topo_order = topo_sort(graph)
     node_types = {n.id: n.type for n in graph.nodes}
     edges = [(e.from_node, e.from_port, e.to_node, e.to_port) for e in graph.edges]
@@ -108,25 +113,19 @@ def suggest_fusions(graph_data: dict):
 
     return {
         "available": True,
-        "suggestions": [{"nodes": nids, "kernel": fdef.cls.__name__} for nids, fdef in groups],
+        "suggestions": [
+            {"nodes": nids, "kernel": fdef.cls.__name__} for nids, fdef in groups
+        ],
     }
 
 
 @router.post("/generate")
-def generate(request: dict):
-    prompt_ids = request.get("prompt_ids", [])
-    max_new_tokens = request.get("max_new_tokens", 50)
-    temperature = request.get("temperature", 1.0)
-    top_k = request.get("top_k")
-
-    if not prompt_ids:
-        raise HTTPException(status_code=400, detail="prompt_ids required")
-
+def generate(request: GenerateRequest):
     result = worker.generate(
-        prompt_ids=prompt_ids,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        top_k=top_k,
+        prompt_ids=request.prompt_ids,
+        max_new_tokens=request.max_new_tokens,
+        temperature=request.temperature,
+        top_k=request.top_k,
     )
 
     if "error" in result:
@@ -136,13 +135,8 @@ def generate(request: dict):
 
 
 @router.post("/decode")
-def decode_tokens(request: dict):
-    token_ids = request.get("token_ids", [])
-
-    if not token_ids:
-        raise HTTPException(status_code=400, detail="token_ids required")
-
-    result = worker.decode_tokens(token_ids)
+def decode_tokens(request: DecodeRequest):
+    result = worker.decode_tokens(request.token_ids)
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -151,14 +145,7 @@ def decode_tokens(request: dict):
 
 
 @router.post("/train")
-def train(request: dict, background_tasks: BackgroundTasks):
-    max_steps = request.get("max_steps", 2000)
-    batch_size = request.get("batch_size", 32)
-    learning_rate = request.get("learning_rate", 3e-4)
-    eval_interval = request.get("eval_interval", 200)
-    eval_iters = request.get("eval_iters", 50)
-    checkpoint_path = request.get("checkpoint_path")
-
+def train(request: TrainRequest, background_tasks: BackgroundTasks):
     if worker.model is None:
         raise HTTPException(status_code=400, detail="no model compiled")
     if worker.training:
@@ -166,15 +153,15 @@ def train(request: dict, background_tasks: BackgroundTasks):
 
     background_tasks.add_task(
         worker.train,
-        max_steps=max_steps,
-        batch_size=batch_size,
-        learning_rate=learning_rate,
-        eval_interval=eval_interval,
-        eval_iters=eval_iters,
-        checkpoint_path=checkpoint_path,
+        max_steps=request.max_steps,
+        batch_size=request.batch_size,
+        learning_rate=request.learning_rate,
+        eval_interval=request.eval_interval,
+        eval_iters=request.eval_iters,
+        checkpoint_path=request.checkpoint_path,
     )
 
-    return {"status": "started", "max_steps": max_steps}
+    return {"status": "started", "max_steps": request.max_steps}
 
 
 @router.get("/train/status")
