@@ -19,6 +19,7 @@ from server.models.graph import GraphSpec
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 RAW_DIR = DATA_DIR / "raw"
 TOKENIZER_PATH = DATA_DIR / "yapuny_tokenizer.json"
+CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / "checkpoints"
 MAX_CORPUS_BYTES = 10 * 1024 * 1024  # 10 MB cap
 
 
@@ -28,8 +29,8 @@ class Worker:
         self.compiler = GraphCompiler()
         self.model = None
         self.graph = None
-        self._unfused_state = None
         self._structure_hash = None
+        self._weight_store: dict[str, dict] = {}
         self.training = False
         self.train_state = None
 
@@ -89,35 +90,41 @@ class Worker:
 
     def compile_graph(self, graph_data: dict):
         new_graph = GraphSpec.from_dict(graph_data)
-        # hash of nodes + edges + meta, excluding fusion_groups
         new_hash = graph_structure_hash(new_graph)
 
-        structure_changed = new_hash != self._structure_hash
-        has_trained_weights = self._unfused_state is not None
+        pretrained = self._weight_store.get(new_hash) or self._load_checkpoint(new_hash)
 
-        if not structure_changed and has_trained_weights:
-            # only fusion config changed - reuse trained weights
-            result = self._recompile_with_weights(new_graph)
+        if pretrained is not None:
+            result = self._recompile_with_weights(new_graph, pretrained)
         else:
-            # structural change (or first compile) - fresh init, must retrain
             self.graph = new_graph
             self.model = self.compiler.compile(self.graph)
             self.model.to(self.device)
             self.model.eval()
-            self._unfused_state = None
             result = {"status": "compiled", "weights": "reinitialized"}
 
         self._structure_hash = new_hash
         result["device"] = str(self.device)
         return result
 
-    def _recompile_with_weights(self, new_graph: GraphSpec):
-        # compile with pretrained snapshot - handles fusion + weight transfer internally
-        self.model = self.compiler.compile(new_graph, pretrained_state=self._unfused_state)
+    def _recompile_with_weights(self, new_graph: GraphSpec, pretrained_state: dict):
+        self.model = self.compiler.compile(new_graph, pretrained_state=pretrained_state)
         self.model.to(self.device)
         self.model.eval()
         self.graph = new_graph
         return {"status": "compiled", "weights": "preserved"}
+
+    def _checkpoint_path(self, structure_hash: str) -> Path:
+        return CHECKPOINT_DIR / f"{structure_hash[:12]}.pt"
+
+    def _load_checkpoint(self, structure_hash: str) -> dict | None:
+        path = self._checkpoint_path(structure_hash)
+        if not path.exists():
+            return None
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
+        state = checkpoint["model"]
+        self._weight_store[structure_hash] = state
+        return state
 
     def train(
         self,
@@ -180,17 +187,16 @@ class Worker:
             self.train_state["train_loss"] = losses["train"]
             self.train_state["val_loss"] = losses["val"]
 
-            # save checkpoint
-            if checkpoint_path is None:
-                checkpoint_path = str(
-                    Path(__file__).resolve().parent.parent / "checkpoints" / "yapuny_graph.pt"
-                )
-            path = Path(checkpoint_path)
-            path.parent.mkdir(exist_ok=True)
-            torch.save({"model": self.model.state_dict()}, path)
-            self.train_state["checkpoint"] = str(path)
-
+            # save checkpoint keyed by structure hash
             self._snapshot_unfused_state()
+            if checkpoint_path is None:
+                CHECKPOINT_DIR.mkdir(exist_ok=True)
+                path = self._checkpoint_path(self._structure_hash)
+            else:
+                path = Path(checkpoint_path)
+                path.parent.mkdir(exist_ok=True)
+            torch.save({"model": self._weight_store[self._structure_hash]}, path)
+            self.train_state["checkpoint"] = str(path)
 
         finally:
             self.training = False
@@ -210,9 +216,9 @@ class Worker:
         return self.train_state
 
     def _snapshot_unfused_state(self):
-        """Save trained weights in unfused form for later fusion toggling."""
+        """Save trained weights in unfused form into the weight store."""
         if not self.graph.fusion_groups:
-            self._unfused_state = self.model.state_dict()
+            self._weight_store[self._structure_hash] = self.model.state_dict()
             return
 
         from copy import deepcopy
@@ -223,19 +229,16 @@ class Worker:
         for fg in self.graph.fusion_groups:
             fused_node_ids.update(fg.nodes)
 
-        # compile a fresh unfused model to get correct keys and structure
         unfused_graph = deepcopy(self.graph)
         unfused_graph.fusion_groups = []
         unfused_model = self.compiler.compile(unfused_graph)
 
-        # copy trained weights from non-fused nodes
         for nid in unfused_model.node_modules:
             if nid not in fused_node_ids:
                 src = self.model.node_modules[nid]
                 dst = unfused_model.node_modules[nid]
                 dst.load_state_dict(src.state_dict())
 
-        # extract trained weights from fused kernels back into unfused nodes
         for fg in self.graph.fusion_groups:
             fused_id = "_fused_" + "_".join(fg.nodes)
             fused_module = self.model.node_modules[fused_id]
@@ -248,7 +251,7 @@ class Worker:
             if hasattr(fused_module, "save_to_nodes"):
                 fused_module.save_to_nodes(unfused_nodes)
 
-        self._unfused_state = unfused_model.state_dict()
+        self._weight_store[self._structure_hash] = unfused_model.state_dict()
 
     def _get_batch(self, split: str, block_size: int, batch_size: int):
         path = DATA_DIR / ("train.bin" if split == "train" else "val.bin")
