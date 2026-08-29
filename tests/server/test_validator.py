@@ -118,11 +118,12 @@ class TestFusionValidation:
         assert not result.valid
         assert any("already in another fusion group" in e for e in result.errors)
 
-    def test_unconnected_chain(self, validator, valid_graph_dict):
-        valid_graph_dict["fusion_groups"] = [
-            {"nodes": ["b0_resid_drop1", "b0_ln2"]},
+    def test_unconnected_chain(self, validator):
+        g = default_gpt_graph(n_layer=2)
+        g["fusion_groups"] = [
+            {"nodes": ["b0_resid_drop1", "b1_res1"]},
         ]
-        graph = GraphSpec.from_dict(valid_graph_dict)
+        graph = GraphSpec.from_dict(g)
         result = validator.validate(graph)
         assert not result.valid
         assert any("not connected" in e for e in result.errors)
