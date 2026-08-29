@@ -287,10 +287,13 @@ class Worker:
             return {"error": "no model compiled"}
 
         idx = torch.tensor([prompt_ids], device=self.device)
+        block_size = self.model.meta["block_size"]
         tokens = []
 
         for _ in range(max_new_tokens):
-            logits, _, _ = self.model(idx)
+            # truncate to context window
+            idx_cond = idx[:, -block_size:]
+            logits, _, _ = self.model(idx_cond)
             logits = logits[:, -1, :] / temperature
 
             if top_k is not None:
