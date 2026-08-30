@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
-
 import torch
 
 from server.compiler.compiler import GraphCompiler
@@ -10,11 +8,9 @@ from tests.server.graph_factory import default_gpt_graph
 from worker.bench import (
     BenchResult,
     TimingResult,
-    GraphResult,
     bench_graph,
     run_benchmark,
 )
-
 from worker.worker import Worker
 
 TINY = dict(n_layer=2, n_head=2, n_embd=32, block_size=16, vocab_size=64)
@@ -32,8 +28,14 @@ class TestBenchGraph:
     def test_inference_returns_expected_keys(self):
         model, _ = _compile(default_gpt_graph(**TINY))
         result = bench_graph(
-            model, torch.device("cpu"), mode="decode",
-            prompt_tokens=4, new_tokens=8, batch_size=1, repeats=3, warmup=1,
+            model,
+            torch.device("cpu"),
+            mode="decode",
+            prompt_tokens=4,
+            new_tokens=8,
+            batch_size=1,
+            repeats=3,
+            warmup=1,
         )
         assert isinstance(result["prefill_ms"], TimingResult)
         assert isinstance(result["decode_ms_per_token"], TimingResult)
@@ -47,8 +49,12 @@ class TestBenchGraph:
     def test_train_returns_expected_keys(self):
         model, _ = _compile(default_gpt_graph(**TINY))
         result = bench_graph(
-            model, torch.device("cpu"), mode="train",
-            batch_size=2, repeats=3, warmup=1,
+            model,
+            torch.device("cpu"),
+            mode="train",
+            batch_size=2,
+            repeats=3,
+            warmup=1,
         )
         assert isinstance(result["forward_ms"], TimingResult)
         assert isinstance(result["backward_ms"], TimingResult)
@@ -60,8 +66,14 @@ class TestBenchGraph:
     def test_timing_result_spread(self):
         model, _ = _compile(default_gpt_graph(**TINY))
         result = bench_graph(
-            model, torch.device("cpu"), mode="decode",
-            prompt_tokens=4, new_tokens=8, batch_size=1, repeats=5, warmup=1,
+            model,
+            torch.device("cpu"),
+            mode="decode",
+            prompt_tokens=4,
+            new_tokens=8,
+            batch_size=1,
+            repeats=5,
+            warmup=1,
         )
         tr = result["prefill_ms"]
         assert tr.p05 <= tr.median <= tr.p95
@@ -70,8 +82,12 @@ class TestBenchGraph:
     def test_model_back_to_eval_after_train_bench(self):
         model, _ = _compile(default_gpt_graph(**TINY))
         bench_graph(
-            model, torch.device("cpu"), mode="train",
-            batch_size=2, repeats=2, warmup=1,
+            model,
+            torch.device("cpu"),
+            mode="train",
+            batch_size=2,
+            repeats=2,
+            warmup=1,
         )
         assert not model.training
 
@@ -80,16 +96,23 @@ class TestRunBenchmark:
     def test_single_graph(self):
         model, graph = _compile(default_gpt_graph(**TINY))
         from server.compiler.utils import graph_structure_hash
+
         result = run_benchmark(
-            graphs=[{
-                "graph_id": "test-v1",
-                "structure_hash": graph_structure_hash(graph),
-                "model": model,
-                "meta": {"n_layer": 2, "n_embd": 32},
-            }],
+            graphs=[
+                {
+                    "graph_id": "test-v1",
+                    "structure_hash": graph_structure_hash(graph),
+                    "model": model,
+                    "meta": {"n_layer": 2, "n_embd": 32},
+                }
+            ],
             device=torch.device("cpu"),
             mode="decode",
-            prompt_tokens=4, new_tokens=8, batch_size=1, repeats=3, warmup=1,
+            prompt_tokens=4,
+            new_tokens=8,
+            batch_size=1,
+            repeats=3,
+            warmup=1,
         )
         assert isinstance(result, BenchResult)
         assert len(result.graphs) == 1
@@ -104,6 +127,7 @@ class TestRunBenchmark:
         model_c, graph_c = _compile(default_gpt_graph(**different))
 
         from server.compiler.utils import graph_structure_hash
+
         hash_ab = graph_structure_hash(graph_a)
         hash_c = graph_structure_hash(graph_c)
         assert hash_ab != hash_c
@@ -116,7 +140,11 @@ class TestRunBenchmark:
             ],
             device=torch.device("cpu"),
             mode="decode",
-            prompt_tokens=4, new_tokens=4, batch_size=1, repeats=2, warmup=1,
+            prompt_tokens=4,
+            new_tokens=4,
+            batch_size=1,
+            repeats=2,
+            warmup=1,
         )
         assert len(result.structure_groups) == 2
         group_sizes = sorted(len(g) for g in result.structure_groups)
@@ -125,16 +153,21 @@ class TestRunBenchmark:
     def test_train_mode(self):
         model, graph = _compile(default_gpt_graph(**TINY))
         from server.compiler.utils import graph_structure_hash
+
         result = run_benchmark(
-            graphs=[{
-                "graph_id": "train-test",
-                "structure_hash": graph_structure_hash(graph),
-                "model": model,
-                "meta": {},
-            }],
+            graphs=[
+                {
+                    "graph_id": "train-test",
+                    "structure_hash": graph_structure_hash(graph),
+                    "model": model,
+                    "meta": {},
+                }
+            ],
             device=torch.device("cpu"),
             mode="train",
-            batch_size=2, repeats=3, warmup=1,
+            batch_size=2,
+            repeats=3,
+            warmup=1,
         )
         v = result.graphs[0]
         assert v.steps_per_sec > 0

@@ -55,7 +55,8 @@ async def upload_corpus(file: UploadFile):
 @router.post("/data/prepare")
 def prepare_data(request: PrepareDataRequest = PrepareDataRequest()):
     result = worker.prepare_data(
-        vocab_size=request.vocab_size, val_fraction=request.val_fraction,
+        vocab_size=request.vocab_size,
+        val_fraction=request.val_fraction,
     )
 
     if "error" in result:
@@ -94,10 +95,7 @@ def fusion_available():
 
     return {
         "available": FUSION_AVAILABLE,
-        "patterns": [
-            {"nodes": list(f.pattern), "kernel": f.cls.__name__}
-            for f in FUSION_REGISTRY
-        ],
+        "patterns": [{"nodes": list(f.pattern), "kernel": f.cls.__name__} for f in FUSION_REGISTRY],
     }
 
 
@@ -119,9 +117,7 @@ def suggest_fusions(request: GraphRequest):
 
     return {
         "available": True,
-        "suggestions": [
-            {"nodes": nids, "kernel": fdef.cls.__name__} for nids, fdef in groups
-        ],
+        "suggestions": [{"nodes": nids, "kernel": fdef.cls.__name__} for nids, fdef in groups],
     }
 
 
@@ -159,11 +155,13 @@ def list_graphs():
     results = []
     for graph_id, data in _graphs.items():
         graph = GraphSpec.from_dict(data)
-        results.append({
-            "id": graph_id,
-            "meta": data.get("meta", {}),
-            "structure_hash": graph_structure_hash(graph),
-        })
+        results.append(
+            {
+                "id": graph_id,
+                "meta": data.get("meta", {}),
+                "structure_hash": graph_structure_hash(graph),
+            }
+        )
     return {"graphs": results}
 
 
@@ -202,6 +200,7 @@ def stop_training():
 
 
 # -- Benchmark --
+
 
 def _run_bench(run_id: str, request: BenchRunRequest):
     from dataclasses import asdict
@@ -245,12 +244,14 @@ def _run_bench(run_id: str, request: BenchRunRequest):
             model.to(device)
             model.eval()
 
-            compiled.append({
-                "graph_id": graph_id,
-                "structure_hash": s_hash,
-                "model": model,
-                "meta": asdict(graph.meta),
-            })
+            compiled.append(
+                {
+                    "graph_id": graph_id,
+                    "structure_hash": s_hash,
+                    "model": model,
+                    "meta": asdict(graph.meta),
+                }
+            )
 
         wl = request.workload
         result = run_benchmark(

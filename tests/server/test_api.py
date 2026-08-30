@@ -93,7 +93,9 @@ class TestGraphRequest:
     def test_extra_top_level_field_rejected(self):
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
             GraphRequest(
-                nodes=[], edges=[], id="sneaky",
+                nodes=[],
+                edges=[],
+                id="sneaky",
             )
 
     def test_model_dump_roundtrip(self):
@@ -166,6 +168,7 @@ class TestPrepareDataRequest:
 
 # -- route-level tests --
 
+
 class TestValidateRoute:
     def test_invalid_fusion_pattern_returns_error(self):
         graph = default_gpt_graph(n_layer=1)
@@ -202,6 +205,7 @@ class TestValidateRoute:
 
 # -- benchmark schemas --
 
+
 class TestBenchRunRequest:
     def test_defaults(self):
         r = BenchRunRequest(graph_ids=["a"])
@@ -232,6 +236,7 @@ class TestBenchRunRequest:
 
 # -- benchmark route tests --
 
+
 def _save_and_compile(graph_id: str, **kwargs):
     graph = default_gpt_graph(**kwargs)
     graph["id"] = graph_id
@@ -243,6 +248,7 @@ def _save_and_compile(graph_id: str, **kwargs):
 class TestGraphListRoute:
     def test_list_empty(self):
         from server.api.routes import _graphs
+
         _graphs.clear()
         resp = client.get("/api/graph")
         assert resp.status_code == 200
@@ -250,6 +256,7 @@ class TestGraphListRoute:
 
     def test_list_after_save(self):
         from server.api.routes import _graphs
+
         _graphs.clear()
         graph = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
         graph["id"] = "test-list"
@@ -265,6 +272,7 @@ class TestBenchRoutes:
     @pytest.fixture(autouse=True)
     def _clean(self):
         from server.api.routes import _bench_runs, _graphs
+
         _graphs.clear()
         _bench_runs.clear()
         yield
@@ -274,12 +282,20 @@ class TestBenchRoutes:
     def test_run_and_poll(self):
         _save_and_compile("bench-a", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
 
-        resp = client.post("/api/bench/run", json={
-            "graph_ids": ["bench-a"],
-            "workload": {"mode": "decode", "prompt_tokens": 4, "new_tokens": 4, "batch_size": 1},
-            "repeats": 2,
-            "warmup": 1,
-        })
+        resp = client.post(
+            "/api/bench/run",
+            json={
+                "graph_ids": ["bench-a"],
+                "workload": {
+                    "mode": "decode",
+                    "prompt_tokens": 4,
+                    "new_tokens": 4,
+                    "batch_size": 1,
+                },
+                "repeats": 2,
+                "warmup": 1,
+            },
+        )
         assert resp.status_code == 200
         run_id = resp.json()["run_id"]
 
@@ -293,11 +309,14 @@ class TestBenchRoutes:
         assert v["prefill_ms"]["median"] > 0
 
     def test_unknown_graph_returns_error(self):
-        resp = client.post("/api/bench/run", json={
-            "graph_ids": ["nonexistent"],
-            "repeats": 2,
-            "warmup": 1,
-        })
+        resp = client.post(
+            "/api/bench/run",
+            json={
+                "graph_ids": ["nonexistent"],
+                "repeats": 2,
+                "warmup": 1,
+            },
+        )
         run_id = resp.json()["run_id"]
         result = client.get(f"/api/bench/{run_id}").json()
         assert result["status"] == "error"
@@ -311,12 +330,20 @@ class TestBenchRoutes:
         _save_and_compile("v1", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
         _save_and_compile("v2", n_layer=2, n_head=2, n_embd=32, block_size=16, vocab_size=64)
 
-        resp = client.post("/api/bench/run", json={
-            "graph_ids": ["v1", "v2"],
-            "workload": {"mode": "decode", "prompt_tokens": 4, "new_tokens": 4, "batch_size": 1},
-            "repeats": 2,
-            "warmup": 1,
-        })
+        resp = client.post(
+            "/api/bench/run",
+            json={
+                "graph_ids": ["v1", "v2"],
+                "workload": {
+                    "mode": "decode",
+                    "prompt_tokens": 4,
+                    "new_tokens": 4,
+                    "batch_size": 1,
+                },
+                "repeats": 2,
+                "warmup": 1,
+            },
+        )
         run_id = resp.json()["run_id"]
         result = client.get(f"/api/bench/{run_id}").json()
         assert result["status"] == "complete"
@@ -326,12 +353,15 @@ class TestBenchRoutes:
     def test_train_mode_bench(self):
         _save_and_compile("train-v", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
 
-        resp = client.post("/api/bench/run", json={
-            "graph_ids": ["train-v"],
-            "workload": {"mode": "train", "batch_size": 2},
-            "repeats": 2,
-            "warmup": 1,
-        })
+        resp = client.post(
+            "/api/bench/run",
+            json={
+                "graph_ids": ["train-v"],
+                "workload": {"mode": "train", "batch_size": 2},
+                "repeats": 2,
+                "warmup": 1,
+            },
+        )
         run_id = resp.json()["run_id"]
         result = client.get(f"/api/bench/{run_id}").json()
         assert result["status"] == "complete"

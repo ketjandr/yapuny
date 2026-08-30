@@ -52,6 +52,7 @@ def _collect_env(device: torch.device) -> dict:
         env["sm_count"] = torch.cuda.get_device_properties(device).multi_processor_count
         try:
             import triton
+
             env["triton"] = triton.__version__
         except ImportError:
             env["triton"] = None
@@ -229,9 +230,7 @@ def _bench_train(
 
             forward_times.append(fwd_start.elapsed_time(fwd_end))
             backward_times.append(bwd_start.elapsed_time(bwd_end))
-            step_times.append(
-                fwd_start.elapsed_time(fwd_end) + bwd_start.elapsed_time(bwd_end)
-            )
+            step_times.append(fwd_start.elapsed_time(fwd_end) + bwd_start.elapsed_time(bwd_end))
         else:
             t0 = time.perf_counter()
             _, loss, _ = model(x, y)
@@ -275,7 +274,13 @@ def bench_graph(
         metrics = _bench_train(model, device, batch_size, repeats, warmup)
     else:
         metrics = _bench_inference(
-            model, device, prompt_tokens, new_tokens, batch_size, repeats, warmup,
+            model,
+            device,
+            prompt_tokens,
+            new_tokens,
+            batch_size,
+            repeats,
+            warmup,
         )
 
     peak_vram = None
@@ -331,20 +336,22 @@ def run_benchmark(
             warmup=warmup,
         )
 
-        results.append(GraphResult(
-            graph_id=g["graph_id"],
-            structure_hash=g["structure_hash"],
-            meta=g["meta"],
-            param_count=metrics["param_count"],
-            weight_bytes=metrics["weight_bytes"],
-            peak_vram_mb=metrics["peak_vram_mb"],
-            prefill_ms=metrics.get("prefill_ms"),
-            decode_ms_per_token=metrics.get("decode_ms_per_token"),
-            tokens_per_sec=metrics.get("tokens_per_sec"),
-            steps_per_sec=metrics.get("steps_per_sec"),
-            forward_ms=metrics.get("forward_ms"),
-            backward_ms=metrics.get("backward_ms"),
-        ))
+        results.append(
+            GraphResult(
+                graph_id=g["graph_id"],
+                structure_hash=g["structure_hash"],
+                meta=g["meta"],
+                param_count=metrics["param_count"],
+                weight_bytes=metrics["weight_bytes"],
+                peak_vram_mb=metrics["peak_vram_mb"],
+                prefill_ms=metrics.get("prefill_ms"),
+                decode_ms_per_token=metrics.get("decode_ms_per_token"),
+                tokens_per_sec=metrics.get("tokens_per_sec"),
+                steps_per_sec=metrics.get("steps_per_sec"),
+                forward_ms=metrics.get("forward_ms"),
+                backward_ms=metrics.get("backward_ms"),
+            )
+        )
 
     return BenchResult(
         mode=mode,

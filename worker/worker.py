@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import statistics
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -289,10 +288,7 @@ class Worker:
             fused_id = "_fused_" + "_".join(fg.nodes)
             fused_module = self.model.node_modules[fused_id]
 
-            unfused_nodes = {
-                node_types[nid]: unfused_model.node_modules[nid]
-                for nid in fg.nodes
-            }
+            unfused_nodes = {node_types[nid]: unfused_model.node_modules[nid] for nid in fg.nodes}
 
             if hasattr(fused_module, "save_to_nodes"):
                 fused_module.save_to_nodes(unfused_nodes)

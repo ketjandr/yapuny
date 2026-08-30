@@ -8,10 +8,12 @@ from server.models.graph import GraphSpec
 from tests.server.graph_factory import default_gpt_graph
 
 requires_cuda = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="CUDA required",
+    not torch.cuda.is_available(),
+    reason="CUDA required",
 )
 requires_fusion = pytest.mark.skipif(
-    not FUSION_AVAILABLE, reason="fusion kernels not available",
+    not FUSION_AVAILABLE,
+    reason="fusion kernels not available",
 )
 
 DEVICE = "cuda"
@@ -119,7 +121,8 @@ class TestPretrainedState:
 
         for key in state:
             torch.testing.assert_close(
-                model_fresh.state_dict()[key], model_loaded.state_dict()[key],
+                model_fresh.state_dict()[key],
+                model_loaded.state_dict()[key],
             )
 
     @requires_fusion

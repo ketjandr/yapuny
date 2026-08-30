@@ -183,8 +183,7 @@ def apply_fusion(
 
         if transfer_weights and hasattr(fused_module, "load_from_nodes"):
             source_nodes = {
-                node_type: new_modules[nid]
-                for nid, node_type in zip(chain, fdef.pattern)
+                node_type: new_modules[nid] for nid, node_type in zip(chain, fdef.pattern)
             }
             fused_module.load_from_nodes(source_nodes)
 

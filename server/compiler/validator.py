@@ -50,7 +50,8 @@ class GraphValidator:
         return ValidationResult(errors=errors, warnings=warnings)
 
     def resolve_fusions(
-        self, graph: GraphSpec,
+        self,
+        graph: GraphSpec,
     ) -> list[tuple[list[str], FusionDef]]:
         """Match fusion groups to registry entries by node type pattern."""
         node_types = {n.id: n.type for n in graph.nodes}
@@ -173,9 +174,7 @@ class GraphValidator:
 
         for fg in graph.fusion_groups:
             # resolve kernel from node type pattern
-            node_pattern = tuple(
-                node_types[nid] for nid in fg.nodes if nid in node_types
-            )
+            node_pattern = tuple(node_types[nid] for nid in fg.nodes if nid in node_types)
             if len(node_pattern) != len(fg.nodes):
                 missing = [nid for nid in fg.nodes if nid not in node_types]
                 for nid in missing:
@@ -186,9 +185,7 @@ class GraphValidator:
 
             if matched is None:
                 types_str = " -> ".join(node_pattern)
-                errors.append(
-                    f"no fusion kernel matches pattern ({types_str})"
-                )
+                errors.append(f"no fusion kernel matches pattern ({types_str})")
                 continue
 
             kernel_name = matched.cls.__name__

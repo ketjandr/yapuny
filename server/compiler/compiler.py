@@ -107,7 +107,9 @@ class GraphCompiler:
         self.validator = GraphValidator()
 
     def compile(
-        self, graph: GraphSpec, pretrained_state: dict | None = None,
+        self,
+        graph: GraphSpec,
+        pretrained_state: dict | None = None,
     ) -> GraphModule:
         result = self.validator.validate(graph)
         if not result.valid:
@@ -141,7 +143,7 @@ class GraphCompiler:
             for node_id, module in modules.items():
                 prefix = f"node_modules.{node_id}."
                 node_state = {
-                    param_name[len(prefix):]: param_tensor
+                    param_name[len(prefix) :]: param_tensor
                     for param_name, param_tensor in pretrained_state.items()
                     if param_name.startswith(prefix)
                 }
@@ -152,8 +154,14 @@ class GraphCompiler:
         resolved_fusions = self.validator.resolve_fusions(graph)
         if resolved_fusions:
             modules, node_types, topo_order, edges, node_outputs = apply_fusion(
-                resolved_fusions, modules, node_types, topo_order, edges,
-                node_outputs, meta, transfer_weights=transfer_weights,
+                resolved_fusions,
+                modules,
+                node_types,
+                topo_order,
+                edges,
+                node_outputs,
+                meta,
+                transfer_weights=transfer_weights,
             )
 
         model = GraphModule(modules, topo_order, edges, node_types, node_outputs, meta)

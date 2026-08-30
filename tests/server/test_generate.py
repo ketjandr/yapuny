@@ -18,18 +18,12 @@ def _worker(graph_dict):
 
 def _no_kv_cache(graph_dict):
     """Strip kv_cache nodes, rewiring score/vws to read k/v straight from qkv."""
-    cache_ids = {
-        n["id"] for n in graph_dict["nodes"] if n["type"] == "kv_cache"
-    }
-    graph_dict["nodes"] = [
-        n for n in graph_dict["nodes"] if n["id"] not in cache_ids
-    ]
+    cache_ids = {n["id"] for n in graph_dict["nodes"] if n["type"] == "kv_cache"}
+    graph_dict["nodes"] = [n for n in graph_dict["nodes"] if n["id"] not in cache_ids]
 
     # qkv -> kvcache edges tell us which qkv feeds each cache
     source = {
-        e["to_node"]: e["from_node"]
-        for e in graph_dict["edges"]
-        if e["to_node"] in cache_ids
+        e["to_node"]: e["from_node"] for e in graph_dict["edges"] if e["to_node"] in cache_ids
     }
 
     rewired = []
@@ -44,7 +38,6 @@ def _no_kv_cache(graph_dict):
     return graph_dict
 
 
-
 class TestKVCacheGeneration:
     def test_cached_matches_uncached(self):
         """Same weights + same seed must give identical tokens with and without cache."""
@@ -54,7 +47,8 @@ class TestKVCacheGeneration:
 
         uncached = _worker(_no_kv_cache(default_gpt_graph(**TINY)))
         uncached.model = uncached.compiler.compile(
-            uncached.graph, pretrained_state=state,
+            uncached.graph,
+            pretrained_state=state,
         ).to(uncached.device)
         uncached.model.eval()
 

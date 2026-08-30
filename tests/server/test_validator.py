@@ -6,7 +6,8 @@ from server.models.graph import GraphSpec
 from tests.server.graph_factory import default_gpt_graph
 
 requires_fusion = pytest.mark.skipif(
-    not FUSION_AVAILABLE, reason="fusion kernels not available",
+    not FUSION_AVAILABLE,
+    reason="fusion kernels not available",
 )
 
 
@@ -27,6 +28,7 @@ def valid_graph_dict():
 
 # -- basic validation --
 
+
 class TestBasicValidation:
     def test_valid_graph_passes(self, validator, valid_graph):
         result = validator.validate(valid_graph)
@@ -41,37 +43,45 @@ class TestBasicValidation:
         assert any("unknown node type" in e for e in result.errors)
 
     def test_missing_required_node(self, validator, valid_graph_dict):
-        valid_graph_dict["nodes"] = [
-            n for n in valid_graph_dict["nodes"] if n["type"] != "lm_head"
-        ]
+        valid_graph_dict["nodes"] = [n for n in valid_graph_dict["nodes"] if n["type"] != "lm_head"]
         graph = GraphSpec.from_dict(valid_graph_dict)
         result = validator.validate(graph)
         assert not result.valid
         assert any("missing required node: lm_head" in e for e in result.errors)
 
     def test_dangling_edge(self, validator, valid_graph_dict):
-        valid_graph_dict["edges"].append({
-            "from_node": "ghost_node", "to_node": "lm_head",
-        })
+        valid_graph_dict["edges"].append(
+            {
+                "from_node": "ghost_node",
+                "to_node": "lm_head",
+            }
+        )
         graph = GraphSpec.from_dict(valid_graph_dict)
         result = validator.validate(graph)
         assert not result.valid
         assert any("ghost_node" in e for e in result.errors)
 
     def test_cycle_detected(self, validator, valid_graph_dict):
-        valid_graph_dict["edges"].append({
-            "from_node": "lm_head", "to_node": "ln_f",
-        })
+        valid_graph_dict["edges"].append(
+            {
+                "from_node": "lm_head",
+                "to_node": "ln_f",
+            }
+        )
         graph = GraphSpec.from_dict(valid_graph_dict)
         result = validator.validate(graph)
         assert not result.valid
         assert any("cycle" in e for e in result.errors)
 
     def test_invalid_port(self, validator, valid_graph_dict):
-        valid_graph_dict["edges"].append({
-            "from_node": "ln_f", "from_port": "nonexistent",
-            "to_node": "lm_head", "to_port": "x",
-        })
+        valid_graph_dict["edges"].append(
+            {
+                "from_node": "ln_f",
+                "from_port": "nonexistent",
+                "to_node": "lm_head",
+                "to_port": "x",
+            }
+        )
         graph = GraphSpec.from_dict(valid_graph_dict)
         result = validator.validate(graph)
         assert not result.valid
@@ -79,6 +89,7 @@ class TestBasicValidation:
 
 
 # -- fusion validation --
+
 
 @requires_fusion
 class TestFusionValidation:
@@ -150,6 +161,7 @@ class TestFusionValidation:
 
 # -- fusion resolution --
 
+
 @requires_fusion
 class TestFusionResolution:
     def test_resolves_dropout_residual(self, validator, valid_graph_dict):
@@ -187,6 +199,7 @@ class TestFusionResolution:
 
 
 # -- warnings --
+
 
 class TestWarnings:
     def test_no_causal_mask_warning(self, validator, valid_graph_dict):
