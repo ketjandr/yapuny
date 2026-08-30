@@ -172,7 +172,7 @@ class TestValidateRoute:
     def test_invalid_fusion_pattern_returns_error(self):
         graph = default_gpt_graph(n_layer=1)
         graph["fusion_groups"] = [{"nodes": ["b0_ln1", "b0_resid_drop1"]}]
-        resp = client.post("/api/validate", json=graph)
+        resp = client.post("/api/graph/validate", json=graph)
         assert resp.status_code == 200
         body = resp.json()
         assert body["valid"] is False
@@ -183,19 +183,19 @@ class TestValidateRoute:
         graph["fusion_groups"] = [
             {"nodes": ["b0_resid_drop1", "b0_res1"], "kernel": "FusedDropoutResidual"},
         ]
-        resp = client.post("/api/validate", json=graph)
+        resp = client.post("/api/graph/validate", json=graph)
         assert resp.status_code == 422
 
     def test_valid_graph_passes(self):
         graph = default_gpt_graph(n_layer=1)
-        resp = client.post("/api/validate", json=graph)
+        resp = client.post("/api/graph/validate", json=graph)
         assert resp.status_code == 200
         assert resp.json()["valid"] is True
 
     def test_unknown_node_in_fusion_returns_error(self):
         graph = default_gpt_graph(n_layer=1)
         graph["fusion_groups"] = [{"nodes": ["ghost", "b0_res1"]}]
-        resp = client.post("/api/validate", json=graph)
+        resp = client.post("/api/graph/validate", json=graph)
         assert resp.status_code == 200
         body = resp.json()
         assert body["valid"] is False
@@ -236,7 +236,7 @@ def _save_and_compile(graph_id: str, **kwargs):
     graph = default_gpt_graph(**kwargs)
     graph["id"] = graph_id
     client.post("/api/graph", json=graph)
-    client.post("/api/compile", json=graph)
+    client.post("/api/graph/compile", json=graph)
     return graph
 
 

@@ -21,11 +21,31 @@ from worker.worker import Worker
 router = APIRouter(prefix="/api")
 worker = Worker()
 
-# in-memory store (swap for DB later)
 _graphs: dict[str, dict] = {}
 
 
-@router.post("/graph")
+# -- Graph --
+
+
+@router.get("/graph", tags=["graph"])
+def list_graphs():
+    from server.compiler.utils import graph_structure_hash
+    from server.models.graph import GraphSpec
+
+    results = []
+    for graph_id, data in _graphs.items():
+        graph = GraphSpec.from_dict(data)
+        results.append(
+            {
+                "id": graph_id,
+                "meta": data.get("meta", {}),
+                "structure_hash": graph_structure_hash(graph),
+            }
+        )
+    return {"graphs": results}
+
+
+@router.post("/graph", tags=["graph"])
 def save_graph(request: SaveGraphRequest):
     graph_data = request.model_dump()
     graph_id = request.id
@@ -33,41 +53,14 @@ def save_graph(request: SaveGraphRequest):
     return {"id": graph_id, "status": "saved"}
 
 
-@router.get("/graph/{graph_id}")
+@router.get("/graph/{graph_id}", tags=["graph"])
 def load_graph(graph_id: str):
     if graph_id not in _graphs:
         raise HTTPException(status_code=404, detail="graph not found")
     return _graphs[graph_id]
 
 
-@router.post("/data/upload")
-async def upload_corpus(file: UploadFile):
-    if not file.filename.endswith(".txt"):
-        raise HTTPException(status_code=400, detail="only .txt files accepted")
-
-    content = await file.read()
-    result = worker.upload_corpus(content, file.filename)
-
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-
-    return result
-
-
-@router.post("/data/prepare")
-def prepare_data(request: PrepareDataRequest = PrepareDataRequest()):
-    result = worker.prepare_data(
-        vocab_size=request.vocab_size,
-        val_fraction=request.val_fraction,
-    )
-
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-
-    return result
-
-
-@router.post("/validate")
+@router.post("/graph/validate", tags=["graph"])
 def validate_graph(request: GraphRequest):
     from server.compiler.validator import GraphValidator
     from server.models.graph import GraphSpec
@@ -81,7 +74,7 @@ def validate_graph(request: GraphRequest):
     }
 
 
-@router.post("/compile")
+@router.post("/graph/compile", tags=["graph"])
 def compile_graph(request: GraphRequest):
     try:
         result = worker.compile_graph(request.model_dump())
@@ -91,17 +84,22 @@ def compile_graph(request: GraphRequest):
     return result
 
 
-@router.get("/fusion/available")
+# -- Fusion --
+
+
+@router.get("/fusion/available", tags=["fusion"])
 def fusion_available():
     from server.compiler.fusion_registry import FUSION_AVAILABLE, FUSION_REGISTRY
 
     return {
         "available": FUSION_AVAILABLE,
-        "patterns": [{"nodes": list(f.pattern), "kernel": f.cls.__name__} for f in FUSION_REGISTRY],
+        "patterns": [
+            {"nodes": list(f.pattern), "kernel": f.cls.__name__} for f in FUSION_REGISTRY
+        ],
     }
 
 
-@router.post("/fusion/suggest")
+@router.post("/fusion/suggest", tags=["fusion"])
 def suggest_fusions(request: GraphRequest):
     from server.compiler.fusion_registry import FUSION_AVAILABLE, detect_fusion_groups
     from server.compiler.utils import topo_sort
@@ -123,7 +121,40 @@ def suggest_fusions(request: GraphRequest):
     }
 
 
-@router.post("/generate")
+# -- Data --
+
+
+@router.post("/data/upload", tags=["data"])
+async def upload_corpus(file: UploadFile):
+    if not file.filename.endswith(".txt"):
+        raise HTTPException(status_code=400, detail="only .txt files accepted")
+
+    content = await file.read()
+    result = worker.upload_corpus(content, file.filename)
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
+
+
+@router.post("/data/prepare", tags=["data"])
+def prepare_data(request: PrepareDataRequest = PrepareDataRequest()):
+    result = worker.prepare_data(
+        vocab_size=request.vocab_size,
+        val_fraction=request.val_fraction,
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
+
+
+# -- Generate --
+
+
+@router.post("/generate", tags=["generate"])
 def generate(request: GenerateRequest):
     result = worker.generate(
         prompt_ids=request.prompt_ids,
@@ -139,7 +170,7 @@ def generate(request: GenerateRequest):
     return result
 
 
-@router.post("/generate/stream")
+@router.post("/generate/stream", tags=["generate"])
 def generate_stream(request: GenerateRequest):
     def event_stream():
         for event in worker.generate_stream(
@@ -154,7 +185,7 @@ def generate_stream(request: GenerateRequest):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@router.post("/decode")
+@router.post("/decode", tags=["generate"])
 def decode_tokens(request: DecodeRequest):
     result = worker.decode_tokens(request.token_ids)
 
@@ -164,22 +195,7 @@ def decode_tokens(request: DecodeRequest):
     return result
 
 
-@router.get("/graph")
-def list_graphs():
-    from server.compiler.utils import graph_structure_hash
-    from server.models.graph import GraphSpec
-
-    results = []
-    for graph_id, data in _graphs.items():
-        graph = GraphSpec.from_dict(data)
-        results.append(
-            {
-                "id": graph_id,
-                "meta": data.get("meta", {}),
-                "structure_hash": graph_structure_hash(graph),
-            }
-        )
-    return {"graphs": results}
+# -- Train --
 
 
 def _start_train(request: TrainRequest, background_tasks: BackgroundTasks):
@@ -200,13 +216,13 @@ def _start_train(request: TrainRequest, background_tasks: BackgroundTasks):
     )
 
 
-@router.post("/train")
+@router.post("/train", tags=["train"])
 def train(request: TrainRequest, background_tasks: BackgroundTasks):
     _start_train(request, background_tasks)
     return {"status": "started", "max_steps": request.max_steps}
 
 
-@router.post("/train/stream")
+@router.post("/train/stream", tags=["train"])
 def train_stream(request: TrainRequest, background_tasks: BackgroundTasks):
     _start_train(request, background_tasks)
 
@@ -231,12 +247,12 @@ def train_stream(request: TrainRequest, background_tasks: BackgroundTasks):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@router.get("/train/status")
+@router.get("/train/status", tags=["train"])
 def train_status():
     return worker.get_train_status()
 
 
-@router.post("/train/stop")
+@router.post("/train/stop", tags=["train"])
 def stop_training():
     result = worker.stop_training()
     if "error" in result:
@@ -311,6 +327,6 @@ def _bench_stream(request: BenchRunRequest):
         worker.model = original_model
 
 
-@router.post("/bench/generate")
+@router.post("/bench/generate", tags=["benchmark"])
 def bench_generate(request: BenchRunRequest):
     return StreamingResponse(_bench_stream(request), media_type="text/event-stream")

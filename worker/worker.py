@@ -368,6 +368,8 @@ class Worker:
             yield {"event": "error", "data": {"error": "no model compiled"}}
             return
 
+        tok = load_tokenizer(TOKENIZER_PATH) if TOKENIZER_PATH.exists() else None
+
         idx = torch.tensor([prompt_ids], device=self.device)
         block_size = self.model.meta["block_size"]
         tokens = []
@@ -392,7 +394,8 @@ class Worker:
             token = next_id.item()
             tokens.append(token)
 
-            event = {"event": "token", "data": {"token": token, "step": step}}
+            text = decode(tok, [token]) if tok else None
+            event = {"event": "token", "data": {"token": token, "text": text, "step": step}}
 
             if bench:
                 elapsed = (self._stamp() - t_decode_start) * 1000
@@ -415,7 +418,8 @@ class Worker:
                 # no kv_cache node, or context window full - recompute the window
                 logits, _, _ = self.model(idx[:, -block_size:])
 
-        done_data = {"tokens": tokens}
+        full_text = decode(tok, tokens) if tok else None
+        done_data = {"tokens": tokens, "text": full_text}
 
         if bench:
             t_decode_end = self._stamp()
