@@ -198,6 +198,61 @@ class TestFusionResolution:
         assert resolved == []
 
 
+# -- quantization validation --
+
+
+TINY = dict(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+
+
+def _quantize_nodes(graph_dict: dict, node_ids: list[str], mode: str = "w8") -> dict:
+    for node in graph_dict["nodes"]:
+        if node["id"] in node_ids:
+            node["quantized"] = mode
+    return graph_dict
+
+
+class TestQuantizationValidation:
+    def test_valid_w8_on_mlp_up(self, validator):
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["b0_mlp_up"], "w8")
+        result = validator.validate(GraphSpec.from_dict(g))
+        assert result.valid
+
+    def test_valid_w4_on_lm_head(self, validator):
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["lm_head"], "w4")
+        result = validator.validate(GraphSpec.from_dict(g))
+        assert result.valid
+
+    def test_invalid_mode_rejected(self, validator):
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["b0_mlp_up"], "w16")
+        result = validator.validate(GraphSpec.from_dict(g))
+        assert not result.valid
+        assert any("invalid quantization mode" in e for e in result.errors)
+
+    def test_non_quantizable_node_rejected(self, validator):
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["emb_drop"], "w8")
+        result = validator.validate(GraphSpec.from_dict(g))
+        assert not result.valid
+        assert any("cannot be quantized" in e for e in result.errors)
+
+    def test_quantized_plus_fusion_rejected(self, validator):
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["b0_resid_drop1"], "w8")
+        g["fusion_groups"] = [{"nodes": ["b0_resid_drop1", "b0_res1"]}]
+        result = validator.validate(GraphSpec.from_dict(g))
+        assert not result.valid
+        assert any("cannot be both quantized" in e for e in result.errors)
+
+    def test_multiple_nodes_quantized(self, validator):
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["b0_qkv", "b0_out_proj", "b0_mlp_up", "b0_mlp_down", "lm_head"], "w8")
+        result = validator.validate(GraphSpec.from_dict(g))
+        assert result.valid
+
+
 # -- warnings --
 
 

@@ -3,6 +3,7 @@ import torch
 
 from server.compiler.compiler import GraphCompiler
 from server.compiler.fusion_registry import FUSION_AVAILABLE
+from server.compiler.quantization_registry import QUANTIZATION_AVAILABLE
 from server.compiler.utils import graph_structure_hash
 from server.models.graph import GraphSpec
 from tests.server.graph_factory import default_gpt_graph
@@ -14,6 +15,10 @@ requires_cuda = pytest.mark.skipif(
 requires_fusion = pytest.mark.skipif(
     not FUSION_AVAILABLE,
     reason="fusion kernels not available",
+)
+requires_quantization = pytest.mark.skipif(
+    not QUANTIZATION_AVAILABLE,
+    reason="Triton/CUDA not available",
 )
 
 DEVICE = "cuda"
@@ -180,3 +185,138 @@ class TestStructureHash:
         d2["fusion_groups"] = [{"nodes": ["b0_resid_drop1", "b0_res1"]}]
         g2 = GraphSpec.from_dict(d2)
         assert graph_structure_hash(g1) == graph_structure_hash(g2)
+
+
+# -- quantization compilation --
+
+
+def _quantize_nodes(graph_dict: dict, node_ids: list[str], mode: str = "w8") -> dict:
+    for node in graph_dict["nodes"]:
+        if node["id"] in node_ids:
+            node["quantized"] = mode
+    return graph_dict
+
+
+class TestQuantizationCompiler:
+    def test_rejects_without_cuda(self):
+        if QUANTIZATION_AVAILABLE:
+            pytest.skip("Triton available, cannot test rejection")
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["b0_mlp_up"], "w8")
+        compiler = GraphCompiler()
+        with pytest.raises(ValueError, match="CUDA GPU"):
+            compiler.compile(GraphSpec.from_dict(g))
+
+    @requires_quantization
+    def test_w8_compiles_and_runs(self, compiler):
+        graph = GraphSpec.from_dict(default_gpt_graph(**TINY))
+        model = compiler.compile(graph)
+        model.eval()
+        pretrained = model.state_dict()
+
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["b0_mlp_up", "b0_mlp_down"], "w8")
+        q_model = compiler.compile(GraphSpec.from_dict(g), pretrained_state=pretrained)
+        q_model.eval()
+
+        idx = torch.randint(0, TINY["vocab_size"], (1, 4))
+        logits, _, _ = q_model(idx)
+        assert logits.shape == (1, 4, TINY["vocab_size"])
+
+    @requires_quantization
+    def test_w4_compiles_and_runs(self, compiler):
+        graph = GraphSpec.from_dict(default_gpt_graph(**TINY))
+        model = compiler.compile(graph)
+        model.eval()
+        pretrained = model.state_dict()
+
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["b0_mlp_up"], "w4")
+        q_model = compiler.compile(GraphSpec.from_dict(g), pretrained_state=pretrained)
+        q_model.eval()
+
+        idx = torch.randint(0, TINY["vocab_size"], (1, 4))
+        logits, _, _ = q_model(idx)
+        assert logits.shape == (1, 4, TINY["vocab_size"])
+
+    @requires_quantization
+    def test_quantized_output_close_to_fp32(self, compiler):
+        graph = GraphSpec.from_dict(default_gpt_graph(**TINY))
+        model = compiler.compile(graph)
+        model.eval()
+        pretrained = model.state_dict()
+
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["b0_mlp_up"], "w8")
+        q_model = compiler.compile(GraphSpec.from_dict(g), pretrained_state=pretrained)
+        q_model.eval()
+
+        idx = torch.randint(0, TINY["vocab_size"], (1, 4))
+        with torch.no_grad():
+            fp32_logits, _, _ = model(idx)
+            q_logits, _, _ = q_model(idx)
+
+        assert torch.allclose(fp32_logits, q_logits, atol=0.5)
+
+    @requires_quantization
+    def test_all_linear_nodes_quantized(self, compiler):
+        graph = GraphSpec.from_dict(default_gpt_graph(**TINY))
+        model = compiler.compile(graph)
+        model.eval()
+        pretrained = model.state_dict()
+
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["b0_qkv", "b0_out_proj", "b0_mlp_up", "b0_mlp_down", "lm_head"], "w8")
+        q_model = compiler.compile(GraphSpec.from_dict(g), pretrained_state=pretrained)
+        q_model.eval()
+
+        idx = torch.randint(0, TINY["vocab_size"], (1, 4))
+        logits, _, _ = q_model(idx)
+        assert logits.shape == (1, 4, TINY["vocab_size"])
+
+    @requires_quantization
+    def test_quantized_reduces_weight_bytes(self, compiler):
+        graph = GraphSpec.from_dict(default_gpt_graph(**TINY))
+        model = compiler.compile(graph)
+        fp32_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
+
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["b0_qkv", "b0_out_proj", "b0_mlp_up", "b0_mlp_down", "lm_head"], "w8")
+        q_model = compiler.compile(
+            GraphSpec.from_dict(g),
+            pretrained_state=model.state_dict(),
+        )
+
+        q_bytes = sum(p.numel() * p.element_size() for p in q_model.parameters())
+        q_buf_bytes = sum(b.numel() * b.element_size() for b in q_model.buffers())
+        total_q = q_bytes + q_buf_bytes
+
+        assert total_q < fp32_bytes
+
+    @requires_quantization
+    def test_train_rejects_quantized_model(self, compiler):
+        from worker.worker import Worker
+
+        graph = GraphSpec.from_dict(default_gpt_graph(**TINY))
+        model = compiler.compile(graph)
+        model.eval()
+        pretrained = model.state_dict()
+
+        g_dict = default_gpt_graph(**TINY)
+        _quantize_nodes(g_dict, ["b0_mlp_up"], "w8")
+        q_graph = GraphSpec.from_dict(g_dict)
+        q_model = compiler.compile(q_graph, pretrained_state=pretrained)
+        q_model.eval()
+
+        w = Worker.__new__(Worker)
+        w.model = q_model
+        w.graph = q_graph
+        w.device = torch.device("cpu")
+        w.training = False
+        w.train_state = None
+        w._weight_store = {}
+        w._structure_hash = None
+
+        result = w.train(max_steps=10)
+        assert "error" in result
+        assert "quantized" in result["error"]

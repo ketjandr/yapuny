@@ -156,6 +156,15 @@ class GraphCompiler:
                 if node_state:
                     module.load_state_dict(node_state)
 
+        # quantize marked nodes
+        quantized_nodes = {n.id: (n.type, n.quantized) for n in graph.nodes if n.quantized}
+        if quantized_nodes:
+            from server.compiler.quantization_registry import quantize_module
+
+            for node_id, (ntype, mode) in quantized_nodes.items():
+                quantize_module(modules[node_id], ntype, mode)
+
+        # resolve fusion kernels and apply them to the graph
         transfer_weights = pretrained_state is not None
         resolved_fusions = self.validator.resolve_fusions(graph)
         if resolved_fusions:

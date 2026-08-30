@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 try:
@@ -27,6 +29,7 @@ class NodeDef:
     inputs: list[str]
     outputs: list[str]
     build_args: dict[str, str]  # param_name -> expression evaluated against meta
+    quantize_attr: str | None = None  # nn.Linear attr name to swap during quantization
 
 
 NODE_REGISTRY: dict[str, NodeDef] = {
@@ -47,6 +50,7 @@ NODE_REGISTRY: dict[str, NodeDef] = {
         inputs=["x"],
         outputs=["q", "k", "v"],
         build_args={"n_embd": "n_embd", "n_head": "n_head"},
+        quantize_attr="proj",
     ),
     "kv_cache": NodeDef(
         cls=KVCache,
@@ -89,6 +93,7 @@ NODE_REGISTRY: dict[str, NodeDef] = {
         inputs=["x"],
         outputs=["out"],
         build_args={"n_embd": "n_embd"},
+        quantize_attr="proj",
     ),
     "residual_add": NodeDef(
         cls=ResidualAdd,
@@ -107,6 +112,7 @@ NODE_REGISTRY: dict[str, NodeDef] = {
         inputs=["x"],
         outputs=["out"],
         build_args={"n_embd": "n_embd"},
+        quantize_attr="fc",
     ),
     "mlp_activation": NodeDef(
         cls=MLPActivation,
@@ -119,12 +125,14 @@ NODE_REGISTRY: dict[str, NodeDef] = {
         inputs=["x"],
         outputs=["out"],
         build_args={"n_embd": "n_embd"},
+        quantize_attr="fc",
     ),
     "lm_head": NodeDef(
         cls=LMHead,
         inputs=["x"],
         outputs=["out"],
         build_args={"n_embd": "n_embd", "vocab_size": "vocab_size"},
+        quantize_attr="proj",
     ),
 }
 

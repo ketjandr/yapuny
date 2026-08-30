@@ -94,9 +94,7 @@ def fusion_available():
 
     return {
         "available": FUSION_AVAILABLE,
-        "patterns": [
-            {"nodes": list(f.pattern), "kernel": f.cls.__name__} for f in FUSION_REGISTRY
-        ],
+        "patterns": [{"nodes": list(f.pattern), "kernel": f.cls.__name__} for f in FUSION_REGISTRY],
     }
 
 
@@ -119,6 +117,24 @@ def suggest_fusions(request: GraphRequest):
     return {
         "available": True,
         "suggestions": [{"nodes": nids, "kernel": fdef.cls.__name__} for nids, fdef in groups],
+    }
+
+
+# -- Quantization --
+
+
+@router.get("/quantization/available", tags=["quantization"])
+def quantization_available():
+    from server.compiler.quantization_registry import (
+        QUANT_MODES,
+        QUANTIZABLE_NODES,
+        QUANTIZATION_AVAILABLE,
+    )
+
+    return {
+        "available": QUANTIZATION_AVAILABLE,
+        "modes": sorted(QUANT_MODES),
+        "node_types": sorted(QUANTIZABLE_NODES),
     }
 
 

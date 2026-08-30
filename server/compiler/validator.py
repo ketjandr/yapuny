@@ -44,6 +44,7 @@ class GraphValidator:
         self._check_cycles(graph, errors)
         self._check_dangling_edges(graph, errors)
         self._check_port_connections(graph, errors)
+        self._check_quantization(graph, errors)
         self._check_fusion_groups(graph, errors)
         self._check_optional_warnings(graph, warnings)
 
@@ -145,6 +146,35 @@ class GraphValidator:
                 )
             if edge.to_port not in to_def.inputs:
                 errors.append(f"node {edge.to_node} ({to_type}) has no input port '{edge.to_port}'")
+
+    def _check_quantization(self, graph: GraphSpec, errors: list[str]):
+        from server.compiler.quantization_registry import QUANT_MODES, QUANTIZABLE_NODES
+
+        quantized_ids = set()
+        for node in graph.nodes:
+            if node.quantized is None:
+                continue
+            if node.quantized not in QUANT_MODES:
+                errors.append(
+                    f"node {node.id}: invalid quantization mode '{node.quantized}'"
+                    f" (must be one of {', '.join(sorted(QUANT_MODES))})"
+                )
+            if node.type not in QUANTIZABLE_NODES:
+                errors.append(
+                    f"node {node.id} ({node.type}): cannot be quantized"
+                    f" (quantizable types: {', '.join(sorted(QUANTIZABLE_NODES))})"
+                )
+            quantized_ids.add(node.id)
+
+        # TODO: support quantized weights inside fused kernels (dequantize before tl.dot)
+        if quantized_ids and graph.fusion_groups:
+            for fg in graph.fusion_groups:
+                overlap = quantized_ids & set(fg.nodes)
+                if overlap:
+                    errors.append(
+                        f"node(s) {', '.join(overlap)} cannot be both quantized"
+                        " and in a fusion group"
+                    )
 
     def _check_fusion_groups(self, graph: GraphSpec, errors: list[str]):
         if not graph.fusion_groups:

@@ -114,6 +114,12 @@ class Worker:
         param_count = sum(p.numel() for p in self.model.parameters())
         weight_bytes = sum(p.numel() * p.element_size() for p in self.model.parameters())
         meta = self.model.meta
+        quantized = {}
+        if self.graph:
+            for n in self.graph.nodes:
+                if n.quantized:
+                    quantized[n.id] = n.quantized
+
         return {
             "param_count": param_count,
             "weight_bytes": weight_bytes,
@@ -122,7 +128,13 @@ class Worker:
             "n_layer": meta.get("n_layer"),
             "n_head": meta.get("n_head"),
             "n_embd": meta.get("n_embd"),
+            "quantized_nodes": quantized if quantized else None,
         }
+
+    def _has_quantized_nodes(self) -> bool:
+        if not self.graph:
+            return False
+        return any(n.quantized for n in self.graph.nodes)
 
     def _recompile_with_weights(self, new_graph: GraphSpec, pretrained_state: dict):
         self.model = self.compiler.compile(new_graph, pretrained_state=pretrained_state)
@@ -158,6 +170,9 @@ class Worker:
 
         if self.training:
             return {"error": "training already in progress"}
+
+        if self._has_quantized_nodes():
+            return {"error": "cannot train a quantized model"}
 
         block_size = self.model.meta["block_size"]
         self.model.train()
