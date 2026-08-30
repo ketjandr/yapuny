@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import statistics
+import time
+
 import numpy as np
 import torch
 
@@ -134,6 +137,7 @@ class Worker:
         eval_interval: int = 200,
         eval_iters: int = 50,
         checkpoint_path: str | None = None,
+        bench: bool = False,
     ):
         if self.model is None:
             return {"error": "no model compiled"}
@@ -154,6 +158,12 @@ class Worker:
 
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
 
+        if bench:
+            fwd_times: list[float] = []
+            bwd_times: list[float] = []
+            if self.device.type == "cuda":
+                torch.cuda.reset_peak_memory_stats(self.device)
+
         try:
             for step in range(max_steps):
                 if not self.training:
@@ -173,11 +183,30 @@ class Worker:
 
                 # train step
                 x, y = self._get_batch("train", block_size, batch_size)
+
+                if bench:
+                    t0 = self._stamp()
+
                 _, loss, _ = self.model(x, y)
+
+                if bench:
+                    t_fwd = self._stamp()
 
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
+
+                if bench:
+                    t_bwd = self._stamp()
+
                 optimizer.step()
+
+                if bench:
+                    fwd_times.append((t_fwd - t0) * 1000)
+                    bwd_times.append((t_bwd - t_fwd) * 1000)
+                    recent = [f + b for f, b in zip(fwd_times[-10:], bwd_times[-10:])]
+                    self.train_state["bench"] = {
+                        "steps_per_sec": 1000.0 / (sum(recent) / len(recent)),
+                    }
 
             self.train_state["step"] = max_steps
             self.train_state["status"] = "completed"
@@ -186,6 +215,23 @@ class Worker:
             losses = self._estimate_loss(block_size, batch_size, eval_iters)
             self.train_state["train_loss"] = losses["train"]
             self.train_state["val_loss"] = losses["val"]
+
+            if bench and fwd_times:
+                from dataclasses import asdict
+
+                from worker.bench import _timing_result
+
+                step_times = [f + b for f, b in zip(fwd_times, bwd_times)]
+                median_step = statistics.median(step_times)
+                peak_vram = None
+                if self.device.type == "cuda":
+                    peak_vram = torch.cuda.max_memory_allocated(self.device) / (1024 * 1024)
+                self.train_state["bench"] = {
+                    "forward_ms": asdict(_timing_result(fwd_times)),
+                    "backward_ms": asdict(_timing_result(bwd_times)),
+                    "steps_per_sec": 1000.0 / median_step if median_step > 0 else 0,
+                    "peak_vram_mb": peak_vram,
+                }
 
             # save checkpoint keyed by structure hash
             self._snapshot_unfused_state()
@@ -253,6 +299,11 @@ class Worker:
 
         self._weight_store[self._structure_hash] = unfused_model.state_dict()
 
+    def _stamp(self) -> float:
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
+        return time.perf_counter()
+
     def _get_batch(self, split: str, block_size: int, batch_size: int):
         path = DATA_DIR / ("train.bin" if split == "train" else "val.bin")
         data = np.memmap(path, dtype=np.uint16, mode="r")
@@ -293,6 +344,7 @@ class Worker:
         max_new_tokens: int = 50,
         temperature: float = 1.0,
         top_k: int | None = None,
+        bench: bool = False,
     ):
         if self.model is None:
             return {"error": "no model compiled"}
@@ -301,8 +353,17 @@ class Worker:
         block_size = self.model.meta["block_size"]
         tokens = []
 
+        if bench:
+            if self.device.type == "cuda":
+                torch.cuda.reset_peak_memory_stats(self.device)
+            t_prefill_start = self._stamp()
+
         # prefill - whole prompt in one pass, seeds the cache if the graph has one
         logits, _, caches = self.model(idx[:, -block_size:])
+
+        if bench:
+            t_prefill_end = self._stamp()
+            t_decode_start = t_prefill_end
 
         for step in range(max_new_tokens):
             next_id = self._sample(logits, temperature, top_k)
@@ -320,7 +381,27 @@ class Worker:
                 # no kv_cache node, or context window full - recompute the window
                 logits, _, _ = self.model(idx[:, -block_size:])
 
-        return {"tokens": tokens}
+        result = {"tokens": tokens}
+
+        if bench:
+            t_decode_end = self._stamp()
+
+            prefill_ms = (t_prefill_end - t_prefill_start) * 1000
+            decode_ms = (t_decode_end - t_decode_start) * 1000
+            num_tokens = len(tokens)
+
+            peak_vram = None
+            if self.device.type == "cuda":
+                peak_vram = torch.cuda.max_memory_allocated(self.device) / (1024 * 1024)
+
+            result["bench"] = {
+                "prefill_ms": prefill_ms,
+                "decode_ms_per_token": decode_ms / num_tokens if num_tokens > 0 else 0,
+                "tokens_per_sec": num_tokens / (decode_ms / 1000) if decode_ms > 0 else 0,
+                "peak_vram_mb": peak_vram,
+            }
+
+        return result
 
     def decode_tokens(self, token_ids: list[int]):
         if not TOKENIZER_PATH.exists():

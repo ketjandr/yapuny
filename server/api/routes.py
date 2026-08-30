@@ -1,6 +1,11 @@
+from __future__ import annotations
+
+import uuid
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile
 
 from server.api.schemas import (
+    BenchRunRequest,
     DecodeRequest,
     GenerateRequest,
     GraphRequest,
@@ -13,8 +18,9 @@ from worker.worker import Worker
 router = APIRouter(prefix="/api")
 worker = Worker()
 
-# in-memory graph store (swap for DB later)
+# in-memory stores (swap for DB later)
 _graphs: dict[str, dict] = {}
+_bench_runs: dict[str, dict] = {}
 
 
 @router.post("/graph")
@@ -126,6 +132,7 @@ def generate(request: GenerateRequest):
         max_new_tokens=request.max_new_tokens,
         temperature=request.temperature,
         top_k=request.top_k,
+        bench=request.bench,
     )
 
     if "error" in result:
@@ -144,6 +151,22 @@ def decode_tokens(request: DecodeRequest):
     return result
 
 
+@router.get("/graph")
+def list_graphs():
+    from server.compiler.utils import graph_structure_hash
+    from server.models.graph import GraphSpec
+
+    results = []
+    for graph_id, data in _graphs.items():
+        graph = GraphSpec.from_dict(data)
+        results.append({
+            "id": graph_id,
+            "meta": data.get("meta", {}),
+            "structure_hash": graph_structure_hash(graph),
+        })
+    return {"graphs": results}
+
+
 @router.post("/train")
 def train(request: TrainRequest, background_tasks: BackgroundTasks):
     if worker.model is None:
@@ -159,6 +182,7 @@ def train(request: TrainRequest, background_tasks: BackgroundTasks):
         eval_interval=request.eval_interval,
         eval_iters=request.eval_iters,
         checkpoint_path=request.checkpoint_path,
+        bench=request.bench,
     )
 
     return {"status": "started", "max_steps": request.max_steps}
@@ -175,3 +199,90 @@ def stop_training():
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+# -- Benchmark --
+
+def _run_bench(run_id: str, request: BenchRunRequest):
+    from dataclasses import asdict
+
+    from server.compiler.compiler import GraphCompiler
+    from server.compiler.utils import graph_structure_hash
+    from server.models.graph import GraphSpec
+    from worker.bench import run_benchmark
+
+    _bench_runs[run_id]["status"] = "running"
+
+    try:
+        compiler = GraphCompiler()
+        device = worker.device
+
+        compiled = []
+        weight_cache: dict[str, dict] = {}
+
+        for graph_id in request.graph_ids:
+            if graph_id not in _graphs:
+                _bench_runs[run_id] = {
+                    "status": "error",
+                    "error": f"graph '{graph_id}' not found",
+                }
+                return
+
+            graph = GraphSpec.from_dict(_graphs[graph_id])
+            s_hash = graph_structure_hash(graph)
+
+            if s_hash not in weight_cache:
+                pretrained = worker._weight_store.get(s_hash)
+                if pretrained:
+                    weight_cache[s_hash] = pretrained
+
+            pretrained = weight_cache.get(s_hash)
+            if pretrained:
+                model = compiler.compile(graph, pretrained_state=pretrained)
+            else:
+                model = compiler.compile(graph)
+
+            model.to(device)
+            model.eval()
+
+            compiled.append({
+                "graph_id": graph_id,
+                "structure_hash": s_hash,
+                "model": model,
+                "meta": asdict(graph.meta),
+            })
+
+        wl = request.workload
+        result = run_benchmark(
+            graphs=compiled,
+            device=device,
+            mode=wl.mode,
+            prompt_tokens=wl.prompt_tokens,
+            new_tokens=wl.new_tokens,
+            batch_size=wl.batch_size,
+            repeats=request.repeats,
+            warmup=request.warmup,
+        )
+
+        _bench_runs[run_id] = {
+            "status": "complete",
+            "result": asdict(result),
+        }
+
+    except Exception as e:
+        _bench_runs[run_id] = {"status": "error", "error": str(e)}
+
+
+@router.post("/bench/run")
+def start_bench(request: BenchRunRequest, background_tasks: BackgroundTasks):
+    run_id = uuid.uuid4().hex[:12]
+    _bench_runs[run_id] = {"status": "pending"}
+    background_tasks.add_task(_run_bench, run_id, request)
+    return {"run_id": run_id, "status": "pending"}
+
+
+@router.get("/bench/{run_id}")
+def get_bench(run_id: str):
+    if run_id not in _bench_runs:
+        raise HTTPException(status_code=404, detail="run not found")
+    return _bench_runs[run_id]
