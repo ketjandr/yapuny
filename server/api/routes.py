@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 
+import torch
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile
 
 from server.api.schemas import (
@@ -203,21 +204,20 @@ def stop_training():
 
 
 def _run_bench(run_id: str, request: BenchRunRequest):
-    from dataclasses import asdict
-
     from server.compiler.compiler import GraphCompiler
     from server.compiler.utils import graph_structure_hash
     from server.models.graph import GraphSpec
-    from worker.bench import run_benchmark
+    from worker.bench import _collect_env
 
     _bench_runs[run_id]["status"] = "running"
+    original_model = worker.model
 
     try:
         compiler = GraphCompiler()
         device = worker.device
-
-        compiled = []
         weight_cache: dict[str, dict] = {}
+
+        results = {}
 
         for graph_id in request.graph_ids:
             if graph_id not in _graphs:
@@ -244,37 +244,39 @@ def _run_bench(run_id: str, request: BenchRunRequest):
             model.to(device)
             model.eval()
 
-            compiled.append(
-                {
-                    "graph_id": graph_id,
-                    "structure_hash": s_hash,
-                    "model": model,
-                    "meta": asdict(graph.meta),
-                }
+            # warmup pass to avoid Triton JIT skew
+            warmup_idx = torch.tensor([request.prompt_ids], device=device)
+            block_size = model.meta["block_size"]
+            with torch.no_grad():
+                model(warmup_idx[:, -block_size:])
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+
+            worker.model = model
+            results[graph_id] = worker.generate(
+                prompt_ids=request.prompt_ids,
+                max_new_tokens=request.max_new_tokens,
+                temperature=request.temperature,
+                top_k=request.top_k,
+                bench=True,
             )
 
-        wl = request.workload
-        result = run_benchmark(
-            graphs=compiled,
-            device=device,
-            mode=wl.mode,
-            prompt_tokens=wl.prompt_tokens,
-            new_tokens=wl.new_tokens,
-            batch_size=wl.batch_size,
-            repeats=request.repeats,
-            warmup=request.warmup,
-        )
+        worker.model = original_model
 
         _bench_runs[run_id] = {
             "status": "complete",
-            "result": asdict(result),
+            "result": {
+                "graphs": results,
+                "env": _collect_env(device),
+            },
         }
 
     except Exception as e:
+        worker.model = original_model
         _bench_runs[run_id] = {"status": "error", "error": str(e)}
 
 
-@router.post("/bench/run")
+@router.post("/bench/generate")
 def start_bench(request: BenchRunRequest, background_tasks: BackgroundTasks):
     run_id = uuid.uuid4().hex[:12]
     _bench_runs[run_id] = {"status": "pending"}

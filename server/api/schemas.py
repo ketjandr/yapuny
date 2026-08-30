@@ -87,15 +87,9 @@ class DecodeRequest(BaseSchema):
 # -- Benchmark --
 
 
-class BenchWorkloadSchema(BaseSchema):
-    mode: str = "decode"
-    prompt_tokens: int = 64
-    new_tokens: int = 128
-    batch_size: int = 1
-
-
 class BenchRunRequest(BaseSchema):
     graph_ids: list[str] = Field(min_length=1, max_length=5)
-    workload: BenchWorkloadSchema = Field(default_factory=BenchWorkloadSchema)
-    repeats: int = Field(default=20, ge=1, le=100)
-    warmup: int = Field(default=5, ge=0, le=20)
+    prompt_ids: list[int]
+    max_new_tokens: int = 50
+    temperature: float = 1.0
+    top_k: int | None = None

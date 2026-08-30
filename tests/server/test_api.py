@@ -4,7 +4,6 @@ from pydantic import ValidationError
 
 from server.api.schemas import (
     BenchRunRequest,
-    BenchWorkloadSchema,
     DecodeRequest,
     FusionGroupSchema,
     GenerateRequest,
@@ -208,30 +207,26 @@ class TestValidateRoute:
 
 class TestBenchRunRequest:
     def test_defaults(self):
-        r = BenchRunRequest(graph_ids=["a"])
-        assert r.repeats == 20
-        assert r.warmup == 5
-        assert r.workload.mode == "decode"
-        assert r.workload.prompt_tokens == 64
+        r = BenchRunRequest(graph_ids=["a"], prompt_ids=[1, 2, 3])
+        assert r.max_new_tokens == 50
+        assert r.temperature == 1.0
+        assert r.top_k is None
 
     def test_too_many_graph_ids_rejected(self):
         with pytest.raises(ValidationError):
-            BenchRunRequest(graph_ids=[f"g{i}" for i in range(6)])
+            BenchRunRequest(graph_ids=[f"g{i}" for i in range(6)], prompt_ids=[1])
 
     def test_empty_graph_ids_rejected(self):
         with pytest.raises(ValidationError):
-            BenchRunRequest(graph_ids=[])
+            BenchRunRequest(graph_ids=[], prompt_ids=[1])
 
-    def test_train_mode(self):
-        r = BenchRunRequest(
-            graph_ids=["a"],
-            workload=BenchWorkloadSchema(mode="train"),
-        )
-        assert r.workload.mode == "train"
+    def test_missing_prompt_ids(self):
+        with pytest.raises(ValidationError):
+            BenchRunRequest(graph_ids=["a"])
 
     def test_extra_field_rejected(self):
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            BenchRunRequest(graph_ids=["a"], gpu="A100")
+            BenchRunRequest(graph_ids=["a"], prompt_ids=[1], gpu="A100")
 
 
 # -- benchmark route tests --
@@ -283,38 +278,31 @@ class TestBenchRoutes:
         _save_and_compile("bench-a", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
 
         resp = client.post(
-            "/api/bench/run",
+            "/api/bench/generate",
             json={
                 "graph_ids": ["bench-a"],
-                "workload": {
-                    "mode": "decode",
-                    "prompt_tokens": 4,
-                    "new_tokens": 4,
-                    "batch_size": 1,
-                },
-                "repeats": 2,
-                "warmup": 1,
+                "prompt_ids": [1, 2, 3],
+                "max_new_tokens": 4,
             },
         )
         assert resp.status_code == 200
         run_id = resp.json()["run_id"]
 
-        # poll until complete (background task runs synchronously in TestClient)
         result = client.get(f"/api/bench/{run_id}").json()
         assert result["status"] == "complete"
-        assert len(result["result"]["graphs"]) == 1
-        v = result["result"]["graphs"][0]
-        assert v["graph_id"] == "bench-a"
-        assert v["tokens_per_sec"] > 0
-        assert v["prefill_ms"]["median"] > 0
+        graphs = result["result"]["graphs"]
+        assert "bench-a" in graphs
+        v = graphs["bench-a"]
+        assert v["bench"]["tokens_per_sec"] > 0
+        assert v["bench"]["prefill_ms"] > 0
+        assert len(v["tokens"]) == 4
 
     def test_unknown_graph_returns_error(self):
         resp = client.post(
-            "/api/bench/run",
+            "/api/bench/generate",
             json={
                 "graph_ids": ["nonexistent"],
-                "repeats": 2,
-                "warmup": 1,
+                "prompt_ids": [1, 2, 3],
             },
         )
         run_id = resp.json()["run_id"]
@@ -326,46 +314,23 @@ class TestBenchRoutes:
         resp = client.get("/api/bench/nope")
         assert resp.status_code == 404
 
-    def test_multiple_graphs_with_structure_groups(self):
+    def test_multiple_graphs(self):
         _save_and_compile("v1", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
         _save_and_compile("v2", n_layer=2, n_head=2, n_embd=32, block_size=16, vocab_size=64)
 
         resp = client.post(
-            "/api/bench/run",
+            "/api/bench/generate",
             json={
                 "graph_ids": ["v1", "v2"],
-                "workload": {
-                    "mode": "decode",
-                    "prompt_tokens": 4,
-                    "new_tokens": 4,
-                    "batch_size": 1,
-                },
-                "repeats": 2,
-                "warmup": 1,
+                "prompt_ids": [1, 2, 3],
+                "max_new_tokens": 4,
             },
         )
         run_id = resp.json()["run_id"]
         result = client.get(f"/api/bench/{run_id}").json()
         assert result["status"] == "complete"
-        assert len(result["result"]["graphs"]) == 2
-        assert len(result["result"]["structure_groups"]) == 2
-
-    def test_train_mode_bench(self):
-        _save_and_compile("train-v", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
-
-        resp = client.post(
-            "/api/bench/run",
-            json={
-                "graph_ids": ["train-v"],
-                "workload": {"mode": "train", "batch_size": 2},
-                "repeats": 2,
-                "warmup": 1,
-            },
-        )
-        run_id = resp.json()["run_id"]
-        result = client.get(f"/api/bench/{run_id}").json()
-        assert result["status"] == "complete"
-        v = result["result"]["graphs"][0]
-        assert v["steps_per_sec"] > 0
-        assert v["forward_ms"]["median"] > 0
-        assert v["backward_ms"]["median"] > 0
+        graphs = result["result"]["graphs"]
+        assert len(graphs) == 2
+        assert "v1" in graphs
+        assert "v2" in graphs
+        assert "env" in result["result"]
