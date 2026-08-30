@@ -47,6 +47,46 @@ class TestBenchFlag:
         assert len(result["tokens"]) == 5
 
 
+class TestGenerateStream:
+    def _make_worker(self):
+        model, _ = _compile(default_gpt_graph(**TINY))
+        w = Worker.__new__(Worker)
+        w.model = model
+        w.device = torch.device("cpu")
+        return w
+
+    def test_streams_tokens(self):
+        w = self._make_worker()
+        events = list(w.generate_stream(prompt_ids=[1, 2, 3], max_new_tokens=5))
+        token_events = [e for e in events if e["event"] == "token"]
+        assert len(token_events) == 5
+        assert all("token" in e["data"] for e in token_events)
+        done = [e for e in events if e["event"] == "done"]
+        assert len(done) == 1
+        assert len(done[0]["data"]["tokens"]) == 5
+
+    def test_streams_with_bench(self):
+        w = self._make_worker()
+        events = list(w.generate_stream(prompt_ids=[1, 2, 3], max_new_tokens=5, bench=True))
+        prefill = [e for e in events if e["event"] == "prefill"]
+        assert len(prefill) == 1
+        assert prefill[0]["data"]["prefill_ms"] > 0
+        token_events = [e for e in events if e["event"] == "token"]
+        assert all("bench" in e["data"] for e in token_events)
+        assert token_events[-1]["data"]["bench"]["tokens_per_sec"] > 0
+        done = [e for e in events if e["event"] == "done"]
+        assert "bench" in done[0]["data"]
+        assert done[0]["data"]["bench"]["prefill_ms"] > 0
+
+    def test_no_model_yields_error(self):
+        w = Worker.__new__(Worker)
+        w.model = None
+        w.device = torch.device("cpu")
+        events = list(w.generate_stream(prompt_ids=[1, 2, 3]))
+        assert len(events) == 1
+        assert events[0]["event"] == "error"
+
+
 class TestProfileGraph:
     def test_decode_returns_node_percentages(self):
         model, _ = _compile(default_gpt_graph(**TINY))

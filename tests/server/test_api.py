@@ -263,18 +263,32 @@ class TestGraphListRoute:
         assert "structure_hash" in body["graphs"][0]
 
 
+def _parse_sse(text: str) -> list[dict]:
+    events = []
+    for block in text.strip().split("\n\n"):
+        event = {}
+        for line in block.strip().split("\n"):
+            if line.startswith("event: "):
+                event["event"] = line[7:]
+            elif line.startswith("data: "):
+                import json
+
+                event["data"] = json.loads(line[6:])
+        if event:
+            events.append(event)
+    return events
+
+
 class TestBenchRoutes:
     @pytest.fixture(autouse=True)
     def _clean(self):
-        from server.api.routes import _bench_runs, _graphs
+        from server.api.routes import _graphs
 
         _graphs.clear()
-        _bench_runs.clear()
         yield
         _graphs.clear()
-        _bench_runs.clear()
 
-    def test_run_and_poll(self):
+    def test_streams_single_graph(self):
         _save_and_compile("bench-a", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
 
         resp = client.post(
@@ -286,16 +300,20 @@ class TestBenchRoutes:
             },
         )
         assert resp.status_code == 200
-        run_id = resp.json()["run_id"]
+        events = _parse_sse(resp.text)
 
-        result = client.get(f"/api/bench/{run_id}").json()
-        assert result["status"] == "complete"
-        graphs = result["result"]["graphs"]
-        assert "bench-a" in graphs
-        v = graphs["bench-a"]
-        assert v["bench"]["tokens_per_sec"] > 0
-        assert v["bench"]["prefill_ms"] > 0
-        assert len(v["tokens"]) == 4
+        starts = [e for e in events if e["event"] == "graph_start"]
+        assert len(starts) == 1
+        assert starts[0]["data"]["graph_id"] == "bench-a"
+
+        tokens = [e for e in events if e["event"] == "token"]
+        assert len(tokens) == 4
+        assert all(t["data"]["graph_id"] == "bench-a" for t in tokens)
+        assert all("bench" in t["data"] for t in tokens)
+
+        dones = [e for e in events if e["event"] == "done"]
+        assert len(dones) >= 1
+        assert "env" in dones[-1]["data"]
 
     def test_unknown_graph_returns_error(self):
         resp = client.post(
@@ -305,14 +323,10 @@ class TestBenchRoutes:
                 "prompt_ids": [1, 2, 3],
             },
         )
-        run_id = resp.json()["run_id"]
-        result = client.get(f"/api/bench/{run_id}").json()
-        assert result["status"] == "error"
-        assert "not found" in result["error"]
-
-    def test_unknown_run_id_404(self):
-        resp = client.get("/api/bench/nope")
-        assert resp.status_code == 404
+        events = _parse_sse(resp.text)
+        errors = [e for e in events if e["event"] == "error"]
+        assert len(errors) == 1
+        assert "not found" in errors[0]["data"]["error"]
 
     def test_multiple_graphs(self):
         _save_and_compile("v1", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
@@ -326,11 +340,17 @@ class TestBenchRoutes:
                 "max_new_tokens": 4,
             },
         )
-        run_id = resp.json()["run_id"]
-        result = client.get(f"/api/bench/{run_id}").json()
-        assert result["status"] == "complete"
-        graphs = result["result"]["graphs"]
-        assert len(graphs) == 2
-        assert "v1" in graphs
-        assert "v2" in graphs
-        assert "env" in result["result"]
+        events = _parse_sse(resp.text)
+
+        starts = [e for e in events if e["event"] == "graph_start"]
+        assert len(starts) == 2
+        assert starts[0]["data"]["graph_id"] == "v1"
+        assert starts[1]["data"]["graph_id"] == "v2"
+
+        v1_tokens = [e for e in events if e["event"] == "token" and e["data"]["graph_id"] == "v1"]
+        v2_tokens = [e for e in events if e["event"] == "token" and e["data"]["graph_id"] == "v2"]
+        assert len(v1_tokens) == 4
+        assert len(v2_tokens) == 4
+
+        dones = [e for e in events if e["event"] == "done"]
+        assert any("env" in d["data"] for d in dones)

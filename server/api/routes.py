@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import uuid
+import json
+import time
 
 import torch
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile
+from starlette.responses import StreamingResponse
 
 from server.api.schemas import (
     BenchRunRequest,
@@ -19,9 +21,8 @@ from worker.worker import Worker
 router = APIRouter(prefix="/api")
 worker = Worker()
 
-# in-memory stores (swap for DB later)
+# in-memory store (swap for DB later)
 _graphs: dict[str, dict] = {}
-_bench_runs: dict[str, dict] = {}
 
 
 @router.post("/graph")
@@ -138,6 +139,21 @@ def generate(request: GenerateRequest):
     return result
 
 
+@router.post("/generate/stream")
+def generate_stream(request: GenerateRequest):
+    def event_stream():
+        for event in worker.generate_stream(
+            prompt_ids=request.prompt_ids,
+            max_new_tokens=request.max_new_tokens,
+            temperature=request.temperature,
+            top_k=request.top_k,
+            bench=request.bench,
+        ):
+            yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @router.post("/decode")
 def decode_tokens(request: DecodeRequest):
     result = worker.decode_tokens(request.token_ids)
@@ -166,8 +182,7 @@ def list_graphs():
     return {"graphs": results}
 
 
-@router.post("/train")
-def train(request: TrainRequest, background_tasks: BackgroundTasks):
+def _start_train(request: TrainRequest, background_tasks: BackgroundTasks):
     if worker.model is None:
         raise HTTPException(status_code=400, detail="no model compiled")
     if worker.training:
@@ -184,7 +199,36 @@ def train(request: TrainRequest, background_tasks: BackgroundTasks):
         bench=request.bench,
     )
 
+
+@router.post("/train")
+def train(request: TrainRequest, background_tasks: BackgroundTasks):
+    _start_train(request, background_tasks)
     return {"status": "started", "max_steps": request.max_steps}
+
+
+@router.post("/train/stream")
+def train_stream(request: TrainRequest, background_tasks: BackgroundTasks):
+    _start_train(request, background_tasks)
+
+    def event_stream():
+        prev = None
+        while True:
+            state = worker.train_state
+            if state is None:
+                time.sleep(0.05)
+                continue
+
+            serialized = json.dumps(state)
+            if serialized != prev:
+                prev = serialized
+                yield f"event: update\ndata: {serialized}\n\n"
+
+            if state.get("status") in ("completed", "stopped", "error"):
+                return
+
+            time.sleep(0.25)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/train/status")
@@ -203,28 +247,22 @@ def stop_training():
 # -- Benchmark --
 
 
-def _run_bench(run_id: str, request: BenchRunRequest):
+def _bench_stream(request: BenchRunRequest):
     from server.compiler.compiler import GraphCompiler
     from server.compiler.utils import graph_structure_hash
     from server.models.graph import GraphSpec
     from worker.bench import _collect_env
 
-    _bench_runs[run_id]["status"] = "running"
     original_model = worker.model
+    compiler = GraphCompiler()
+    device = worker.device
+    weight_cache: dict[str, dict] = {}
 
     try:
-        compiler = GraphCompiler()
-        device = worker.device
-        weight_cache: dict[str, dict] = {}
-
-        results = {}
-
         for graph_id in request.graph_ids:
             if graph_id not in _graphs:
-                _bench_runs[run_id] = {
-                    "status": "error",
-                    "error": f"graph '{graph_id}' not found",
-                }
+                err = {"error": f"graph {graph_id!r} not found"}
+                yield f"event: error\ndata: {json.dumps(err)}\n\n"
                 return
 
             graph = GraphSpec.from_dict(_graphs[graph_id])
@@ -244,7 +282,6 @@ def _run_bench(run_id: str, request: BenchRunRequest):
             model.to(device)
             model.eval()
 
-            # warmup pass to avoid Triton JIT skew
             warmup_idx = torch.tensor([request.prompt_ids], device=device)
             block_size = model.meta["block_size"]
             with torch.no_grad():
@@ -252,40 +289,28 @@ def _run_bench(run_id: str, request: BenchRunRequest):
             if device.type == "cuda":
                 torch.cuda.synchronize(device)
 
+            yield f"event: graph_start\ndata: {json.dumps({'graph_id': graph_id})}\n\n"
+
             worker.model = model
-            results[graph_id] = worker.generate(
+            for event in worker.generate_stream(
                 prompt_ids=request.prompt_ids,
                 max_new_tokens=request.max_new_tokens,
                 temperature=request.temperature,
                 top_k=request.top_k,
                 bench=True,
-            )
+            ):
+                event["data"]["graph_id"] = graph_id
+                yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
 
-        worker.model = original_model
-
-        _bench_runs[run_id] = {
-            "status": "complete",
-            "result": {
-                "graphs": results,
-                "env": _collect_env(device),
-            },
-        }
+        yield f"event: done\ndata: {json.dumps({'env': _collect_env(device)})}\n\n"
 
     except Exception as e:
+        yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    finally:
         worker.model = original_model
-        _bench_runs[run_id] = {"status": "error", "error": str(e)}
 
 
 @router.post("/bench/generate")
-def start_bench(request: BenchRunRequest, background_tasks: BackgroundTasks):
-    run_id = uuid.uuid4().hex[:12]
-    _bench_runs[run_id] = {"status": "pending"}
-    background_tasks.add_task(_run_bench, run_id, request)
-    return {"run_id": run_id, "status": "pending"}
-
-
-@router.get("/bench/{run_id}")
-def get_bench(run_id: str):
-    if run_id not in _bench_runs:
-        raise HTTPException(status_code=404, detail="run not found")
-    return _bench_runs[run_id]
+def bench_generate(request: BenchRunRequest):
+    return StreamingResponse(_bench_stream(request), media_type="text/event-stream")

@@ -333,7 +333,6 @@ class Worker:
         probs = torch.softmax(logits, dim=-1)
         return torch.multinomial(probs, num_samples=1)
 
-    @torch.no_grad()
     def generate(
         self,
         prompt_ids: list[int],
@@ -342,8 +341,32 @@ class Worker:
         top_k: int | None = None,
         bench: bool = False,
     ):
+        result = None
+        for event in self.generate_stream(
+            prompt_ids=prompt_ids,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            bench=bench,
+        ):
+            if event["event"] == "error":
+                return event["data"]
+            if event["event"] == "done":
+                result = event["data"]
+        return result
+
+    @torch.no_grad()
+    def generate_stream(
+        self,
+        prompt_ids: list[int],
+        max_new_tokens: int = 50,
+        temperature: float = 1.0,
+        top_k: int | None = None,
+        bench: bool = False,
+    ):
         if self.model is None:
-            return {"error": "no model compiled"}
+            yield {"event": "error", "data": {"error": "no model compiled"}}
+            return
 
         idx = torch.tensor([prompt_ids], device=self.device)
         block_size = self.model.meta["block_size"]
@@ -360,11 +383,26 @@ class Worker:
         if bench:
             t_prefill_end = self._stamp()
             t_decode_start = t_prefill_end
+            prefill_ms = (t_prefill_end - t_prefill_start) * 1000
+            yield {"event": "prefill", "data": {"prefill_ms": prefill_ms}}
 
         for step in range(max_new_tokens):
             next_id = self._sample(logits, temperature, top_k)
             idx = torch.cat((idx, next_id), dim=1)
-            tokens.append(next_id.item())
+            token = next_id.item()
+            tokens.append(token)
+
+            event = {"event": "token", "data": {"token": token, "step": step}}
+
+            if bench:
+                elapsed = (self._stamp() - t_decode_start) * 1000
+                count = len(tokens)
+                event["data"]["bench"] = {
+                    "tokens_per_sec": count / (elapsed / 1000) if elapsed > 0 else 0,
+                    "elapsed_ms": elapsed,
+                }
+
+            yield event
 
             if step == max_new_tokens - 1:
                 break  # have every token - skip the unused final forward
@@ -377,27 +415,23 @@ class Worker:
                 # no kv_cache node, or context window full - recompute the window
                 logits, _, _ = self.model(idx[:, -block_size:])
 
-        result = {"tokens": tokens}
+        done_data = {"tokens": tokens}
 
         if bench:
             t_decode_end = self._stamp()
-
-            prefill_ms = (t_prefill_end - t_prefill_start) * 1000
             decode_ms = (t_decode_end - t_decode_start) * 1000
             num_tokens = len(tokens)
-
             peak_vram = None
             if self.device.type == "cuda":
                 peak_vram = torch.cuda.max_memory_allocated(self.device) / (1024 * 1024)
-
-            result["bench"] = {
+            done_data["bench"] = {
                 "prefill_ms": prefill_ms,
                 "decode_ms_per_token": decode_ms / num_tokens if num_tokens > 0 else 0,
                 "tokens_per_sec": num_tokens / (decode_ms / 1000) if decode_ms > 0 else 0,
                 "peak_vram_mb": peak_vram,
             }
 
-        return result
+        yield {"event": "done", "data": done_data}
 
     def decode_tokens(self, token_ids: list[int]):
         if not TOKENIZER_PATH.exists():
