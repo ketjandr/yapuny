@@ -236,7 +236,8 @@ def _save_and_compile(graph_id: str, **kwargs):
     graph = default_gpt_graph(**kwargs)
     graph["id"] = graph_id
     client.post("/api/graph", json=graph)
-    client.post("/api/graph/compile", json=graph)
+    compile_payload = {k: v for k, v in graph.items() if k != "id"}
+    client.post("/api/graph/compile", json=compile_payload)
     return graph
 
 
@@ -354,3 +355,46 @@ class TestBenchRoutes:
 
         dones = [e for e in events if e["event"] == "done"]
         assert any("env" in d["data"] for d in dones)
+
+
+class TestProfileRoute:
+    def test_profile_decode(self):
+        _save_and_compile("prof", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        resp = client.post(
+            "/api/bench/profile",
+            json={"mode": "decode", "prompt_tokens": 4, "new_tokens": 4, "warmup": 1},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["nodes"]) > 0
+        assert body["total_us"] > 0
+        assert "env" in body
+        total_pct = sum(n["pct"] for n in body["nodes"])
+        assert abs(total_pct - 100.0) < 0.1
+
+    def test_profile_train(self):
+        _save_and_compile("prof", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        resp = client.post(
+            "/api/bench/profile",
+            json={"mode": "train", "warmup": 1},
+        )
+        assert resp.status_code == 200
+        assert len(resp.json()["nodes"]) > 0
+
+    def test_profile_no_model(self):
+        from server.api.routes import worker
+
+        original = worker.model
+        worker.model = None
+        try:
+            resp = client.post("/api/bench/profile", json={})
+            assert resp.status_code == 400
+            assert "no model" in resp.json()["detail"]
+        finally:
+            worker.model = original
+
+    def test_profile_defaults(self):
+        _save_and_compile("prof", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        resp = client.post("/api/bench/profile")
+        assert resp.status_code == 200
+        assert len(resp.json()["nodes"]) > 0

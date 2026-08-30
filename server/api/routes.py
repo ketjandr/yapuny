@@ -13,6 +13,7 @@ from server.api.schemas import (
     GenerateRequest,
     GraphRequest,
     PrepareDataRequest,
+    ProfileRequest,
     SaveGraphRequest,
     TrainRequest,
 )
@@ -261,6 +262,34 @@ def stop_training():
 
 
 # -- Benchmark --
+
+
+@router.post("/bench/profile", tags=["benchmark"])
+def bench_profile(request: ProfileRequest = ProfileRequest()):
+    from dataclasses import asdict
+
+    from worker.bench import profile_graph
+
+    if worker.model is None:
+        raise HTTPException(status_code=400, detail="no model compiled")
+
+    if request.mode not in ("decode", "train"):
+        raise HTTPException(status_code=400, detail="mode must be 'decode' or 'train'")
+
+    result = profile_graph(
+        model=worker.model,
+        device=worker.device,
+        mode=request.mode,
+        prompt_tokens=request.prompt_tokens,
+        new_tokens=request.new_tokens,
+        warmup=request.warmup,
+    )
+
+    return {
+        "nodes": [asdict(n) for n in result.nodes],
+        "total_us": result.total_us,
+        "env": result.env,
+    }
 
 
 def _bench_stream(request: BenchRunRequest):

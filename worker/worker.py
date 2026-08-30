@@ -233,18 +233,30 @@ class Worker:
             if bench and fwd_times:
                 from dataclasses import asdict
 
-                from worker.bench import _timing_result
+                from worker.bench import _timing_result, profile_graph
 
                 step_times = [f + b for f, b in zip(fwd_times, bwd_times)]
                 median_step = statistics.median(step_times)
                 peak_vram = None
                 if self.device.type == "cuda":
                     peak_vram = torch.cuda.max_memory_allocated(self.device) / (1024 * 1024)
+
+                profile = profile_graph(
+                    model=self.model,
+                    device=self.device,
+                    mode="train",
+                    warmup=1,
+                )
+
                 self.train_state["bench"] = {
                     "forward_ms": asdict(_timing_result(fwd_times)),
                     "backward_ms": asdict(_timing_result(bwd_times)),
                     "steps_per_sec": 1000.0 / median_step if median_step > 0 else 0,
                     "peak_vram_mb": peak_vram,
+                    "profile": {
+                        "nodes": [asdict(n) for n in profile.nodes],
+                        "total_us": profile.total_us,
+                    },
                 }
 
             # save checkpoint keyed by structure hash
@@ -451,6 +463,27 @@ class Worker:
             }
 
         yield {"event": "done", "data": done_data}
+
+        if bench:
+            from dataclasses import asdict
+
+            from worker.bench import profile_graph
+
+            result = profile_graph(
+                model=self.model,
+                device=self.device,
+                mode="decode",
+                prompt_tokens=len(prompt_ids),
+                new_tokens=max_new_tokens,
+                warmup=1,
+            )
+            yield {
+                "event": "profile",
+                "data": {
+                    "nodes": [asdict(n) for n in result.nodes],
+                    "total_us": result.total_us,
+                },
+            }
 
     def decode_tokens(self, token_ids: list[int]):
         if not TOKENIZER_PATH.exists():

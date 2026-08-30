@@ -87,6 +87,13 @@ class DecodeRequest(BaseSchema):
 # -- Benchmark --
 
 
+class ProfileRequest(BaseSchema):
+    mode: str = "decode"
+    prompt_tokens: int = 64
+    new_tokens: int = 128
+    warmup: int = 3
+
+
 class BenchRunRequest(BaseSchema):
     graph_ids: list[str] = Field(min_length=1, max_length=5)
     prompt_ids: list[int]
