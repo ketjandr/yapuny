@@ -14,7 +14,6 @@ from server.api.schemas import (
     GraphRequest,
     PrepareDataRequest,
     ProfileRequest,
-    SaveGraphRequest,
     TrainRequest,
 )
 from worker.worker import Worker
@@ -22,43 +21,8 @@ from worker.worker import Worker
 router = APIRouter(prefix="/api")
 worker = Worker()
 
-_graphs: dict[str, dict] = {}
-
 
 # -- Graph --
-
-
-@router.get("/graph", tags=["graph"])
-def list_graphs():
-    from server.compiler.utils import graph_structure_hash
-    from server.models.graph import GraphSpec
-
-    results = []
-    for graph_id, data in _graphs.items():
-        graph = GraphSpec.from_dict(data)
-        results.append(
-            {
-                "id": graph_id,
-                "meta": data.get("meta", {}),
-                "structure_hash": graph_structure_hash(graph),
-            }
-        )
-    return {"graphs": results}
-
-
-@router.post("/graph", tags=["graph"])
-def save_graph(request: SaveGraphRequest):
-    graph_data = request.model_dump()
-    graph_id = request.id
-    _graphs[graph_id] = graph_data
-    return {"id": graph_id, "status": "saved"}
-
-
-@router.get("/graph/{graph_id}", tags=["graph"])
-def load_graph(graph_id: str):
-    if graph_id not in _graphs:
-        raise HTTPException(status_code=404, detail="graph not found")
-    return _graphs[graph_id]
 
 
 @router.post("/graph/validate", tags=["graph"])
@@ -139,6 +103,40 @@ def quantization_available():
 
 
 # -- Data --
+
+
+@router.get("/data/status", tags=["data"])
+def data_status():
+    from worker.worker import DATA_DIR, RAW_DIR, TOKENIZER_PATH
+
+    corpus_path = RAW_DIR / "corpus.txt"
+    has_corpus = corpus_path.exists()
+    has_tokenizer = TOKENIZER_PATH.exists()
+    has_train = (DATA_DIR / "train.bin").exists()
+    has_val = (DATA_DIR / "val.bin").exists()
+
+    return {
+        "corpus_uploaded": has_corpus,
+        "corpus_bytes": corpus_path.stat().st_size if has_corpus else None,
+        "tokenizer_trained": has_tokenizer,
+        "data_prepared": has_train and has_val,
+    }
+
+
+@router.delete("/data/corpus", tags=["data"])
+def delete_corpus():
+    from worker.worker import DATA_DIR, RAW_DIR, TOKENIZER_PATH
+
+    corpus_path = RAW_DIR / "corpus.txt"
+    if not corpus_path.exists():
+        raise HTTPException(status_code=404, detail="no corpus uploaded")
+
+    corpus_path.unlink()
+    for f in [TOKENIZER_PATH, DATA_DIR / "train.bin", DATA_DIR / "val.bin"]:
+        if f.exists():
+            f.unlink()
+
+    return {"status": "deleted"}
 
 
 @router.post("/data/upload", tags=["data"])
@@ -320,13 +318,9 @@ def _bench_stream(request: BenchRunRequest):
     weight_cache: dict[str, dict] = {}
 
     try:
-        for graph_id in request.graph_ids:
-            if graph_id not in _graphs:
-                err = {"error": f"graph {graph_id!r} not found"}
-                yield f"event: error\ndata: {json.dumps(err)}\n\n"
-                return
-
-            graph = GraphSpec.from_dict(_graphs[graph_id])
+        for i, graph_req in enumerate(request.graphs):
+            graph = GraphSpec.from_dict(graph_req.model_dump())
+            graph_idx = i
             s_hash = graph_structure_hash(graph)
 
             if s_hash not in weight_cache:
@@ -350,7 +344,7 @@ def _bench_stream(request: BenchRunRequest):
             if device.type == "cuda":
                 torch.cuda.synchronize(device)
 
-            yield f"event: graph_start\ndata: {json.dumps({'graph_id': graph_id})}\n\n"
+            yield f"event: graph_start\ndata: {json.dumps({'graph_idx': graph_idx})}\n\n"
 
             worker.model = model
             for event in worker.generate_stream(
@@ -360,7 +354,7 @@ def _bench_stream(request: BenchRunRequest):
                 top_k=request.top_k,
                 bench=True,
             ):
-                event["data"]["graph_id"] = graph_id
+                event["data"]["graph_idx"] = graph_idx
                 yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
 
         yield f"event: done\ndata: {json.dumps({'env': _collect_env(device)})}\n\n"

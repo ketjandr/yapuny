@@ -206,62 +206,41 @@ class TestValidateRoute:
 
 
 class TestBenchRunRequest:
+    def _dummy_graph(self):
+        return GraphRequest(**default_gpt_graph(
+            n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64,
+        ))
+
     def test_defaults(self):
-        r = BenchRunRequest(graph_ids=["a"], prompt_ids=[1, 2, 3])
+        r = BenchRunRequest(graphs=[self._dummy_graph()], prompt_ids=[1, 2, 3])
         assert r.max_new_tokens == 50
         assert r.temperature == 1.0
         assert r.top_k is None
 
-    def test_too_many_graph_ids_rejected(self):
+    def test_too_many_graphs_rejected(self):
         with pytest.raises(ValidationError):
-            BenchRunRequest(graph_ids=[f"g{i}" for i in range(6)], prompt_ids=[1])
+            BenchRunRequest(graphs=[self._dummy_graph() for _ in range(6)], prompt_ids=[1])
 
-    def test_empty_graph_ids_rejected(self):
+    def test_empty_graphs_rejected(self):
         with pytest.raises(ValidationError):
-            BenchRunRequest(graph_ids=[], prompt_ids=[1])
+            BenchRunRequest(graphs=[], prompt_ids=[1])
 
     def test_missing_prompt_ids(self):
         with pytest.raises(ValidationError):
-            BenchRunRequest(graph_ids=["a"])
+            BenchRunRequest(graphs=[self._dummy_graph()])
 
     def test_extra_field_rejected(self):
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            BenchRunRequest(graph_ids=["a"], prompt_ids=[1], gpu="A100")
+            BenchRunRequest(graphs=[self._dummy_graph()], prompt_ids=[1], gpu="A100")
 
 
 # -- benchmark route tests --
 
 
-def _save_and_compile(graph_id: str, **kwargs):
+def _compile(**kwargs):
     graph = default_gpt_graph(**kwargs)
-    graph["id"] = graph_id
-    client.post("/api/graph", json=graph)
-    compile_payload = {k: v for k, v in graph.items() if k != "id"}
-    client.post("/api/graph/compile", json=compile_payload)
+    client.post("/api/graph/compile", json=graph)
     return graph
-
-
-class TestGraphListRoute:
-    def test_list_empty(self):
-        from server.api.routes import _graphs
-
-        _graphs.clear()
-        resp = client.get("/api/graph")
-        assert resp.status_code == 200
-        assert resp.json()["graphs"] == []
-
-    def test_list_after_save(self):
-        from server.api.routes import _graphs
-
-        _graphs.clear()
-        graph = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
-        graph["id"] = "test-list"
-        client.post("/api/graph", json=graph)
-        resp = client.get("/api/graph")
-        body = resp.json()
-        assert len(body["graphs"]) == 1
-        assert body["graphs"][0]["id"] == "test-list"
-        assert "structure_hash" in body["graphs"][0]
 
 
 def _parse_sse(text: str) -> list[dict]:
@@ -281,21 +260,13 @@ def _parse_sse(text: str) -> list[dict]:
 
 
 class TestBenchRoutes:
-    @pytest.fixture(autouse=True)
-    def _clean(self):
-        from server.api.routes import _graphs
-
-        _graphs.clear()
-        yield
-        _graphs.clear()
-
     def test_streams_single_graph(self):
-        _save_and_compile("bench-a", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        graph_a = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
 
         resp = client.post(
             "/api/bench/generate",
             json={
-                "graph_ids": ["bench-a"],
+                "graphs": [graph_a],
                 "prompt_ids": [1, 2, 3],
                 "max_new_tokens": 4,
             },
@@ -305,38 +276,25 @@ class TestBenchRoutes:
 
         starts = [e for e in events if e["event"] == "graph_start"]
         assert len(starts) == 1
-        assert starts[0]["data"]["graph_id"] == "bench-a"
+        assert starts[0]["data"]["graph_idx"] == 0
 
         tokens = [e for e in events if e["event"] == "token"]
         assert len(tokens) == 4
-        assert all(t["data"]["graph_id"] == "bench-a" for t in tokens)
+        assert all(t["data"]["graph_idx"] == 0 for t in tokens)
         assert all("bench" in t["data"] for t in tokens)
 
         dones = [e for e in events if e["event"] == "done"]
         assert len(dones) >= 1
         assert "env" in dones[-1]["data"]
 
-    def test_unknown_graph_returns_error(self):
-        resp = client.post(
-            "/api/bench/generate",
-            json={
-                "graph_ids": ["nonexistent"],
-                "prompt_ids": [1, 2, 3],
-            },
-        )
-        events = _parse_sse(resp.text)
-        errors = [e for e in events if e["event"] == "error"]
-        assert len(errors) == 1
-        assert "not found" in errors[0]["data"]["error"]
-
     def test_multiple_graphs(self):
-        _save_and_compile("v1", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
-        _save_and_compile("v2", n_layer=2, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        graph_v1 = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        graph_v2 = default_gpt_graph(n_layer=2, n_head=2, n_embd=32, block_size=16, vocab_size=64)
 
         resp = client.post(
             "/api/bench/generate",
             json={
-                "graph_ids": ["v1", "v2"],
+                "graphs": [graph_v1, graph_v2],
                 "prompt_ids": [1, 2, 3],
                 "max_new_tokens": 4,
             },
@@ -345,13 +303,13 @@ class TestBenchRoutes:
 
         starts = [e for e in events if e["event"] == "graph_start"]
         assert len(starts) == 2
-        assert starts[0]["data"]["graph_id"] == "v1"
-        assert starts[1]["data"]["graph_id"] == "v2"
+        assert starts[0]["data"]["graph_idx"] == 0
+        assert starts[1]["data"]["graph_idx"] == 1
 
-        v1_tokens = [e for e in events if e["event"] == "token" and e["data"]["graph_id"] == "v1"]
-        v2_tokens = [e for e in events if e["event"] == "token" and e["data"]["graph_id"] == "v2"]
-        assert len(v1_tokens) == 4
-        assert len(v2_tokens) == 4
+        g0_tokens = [e for e in events if e["event"] == "token" and e["data"]["graph_idx"] == 0]
+        g1_tokens = [e for e in events if e["event"] == "token" and e["data"]["graph_idx"] == 1]
+        assert len(g0_tokens) == 4
+        assert len(g1_tokens) == 4
 
         dones = [e for e in events if e["event"] == "done"]
         assert any("env" in d["data"] for d in dones)
@@ -359,7 +317,7 @@ class TestBenchRoutes:
 
 class TestProfileRoute:
     def test_profile_decode(self):
-        _save_and_compile("prof", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        _compile(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
         resp = client.post(
             "/api/bench/profile",
             json={"mode": "decode", "prompt_tokens": 4, "new_tokens": 4, "warmup": 1},
@@ -373,7 +331,7 @@ class TestProfileRoute:
         assert abs(total_pct - 100.0) < 0.1
 
     def test_profile_train(self):
-        _save_and_compile("prof", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        _compile(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
         resp = client.post(
             "/api/bench/profile",
             json={"mode": "train", "warmup": 1},
@@ -394,7 +352,7 @@ class TestProfileRoute:
             worker.model = original
 
     def test_profile_defaults(self):
-        _save_and_compile("prof", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        _compile(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
         resp = client.post("/api/bench/profile")
         assert resp.status_code == 200
         assert len(resp.json()["nodes"]) > 0

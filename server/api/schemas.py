@@ -44,10 +44,6 @@ class GraphRequest(BaseSchema):
     meta: GraphMetaSchema = Field(default_factory=GraphMetaSchema)
 
 
-class SaveGraphRequest(GraphRequest):
-    id: str = "default"
-
-
 # -- Data --
 
 
@@ -95,7 +91,7 @@ class ProfileRequest(BaseSchema):
 
 
 class BenchRunRequest(BaseSchema):
-    graph_ids: list[str] = Field(min_length=1, max_length=5)
+    graphs: list[GraphRequest] = Field(min_length=1, max_length=5)
     prompt_ids: list[int]
     max_new_tokens: int = 50
     temperature: float = 1.0
