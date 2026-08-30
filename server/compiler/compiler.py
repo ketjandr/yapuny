@@ -4,6 +4,7 @@ from dataclasses import asdict
 
 import torch
 import torch.nn as nn
+from torch.autograd.profiler import record_function
 from torch.nn import functional as F
 
 from server.compiler.fusion_registry import apply_fusion
@@ -41,6 +42,26 @@ class GraphModule(nn.Module):
         self.node_types = node_types
         self.node_outputs = node_outputs
         self.meta = meta
+        self.profile = False
+
+    def _exec_node(self, node_id, node_type, module, inputs, caches, new_caches, values):
+        """Run one node and store its outputs. Split out so record_function can wrap it cleanly."""
+        if node_type == "kv_cache":
+            cache_val = caches["kv"].get(node_id)
+            k_out, v_out, new_cache = module(inputs["k"], inputs["v"], cache_val)
+            values[(node_id, "k")] = k_out
+            values[(node_id, "v")] = v_out
+            new_caches[node_id] = new_cache
+            return
+
+        result = module(**inputs)  # call forward on this node
+
+        outputs = self.node_outputs[node_id]
+        if isinstance(result, tuple):
+            for port, val in zip(outputs, result):
+                values[(node_id, port)] = val
+        else:
+            values[(node_id, outputs[0])] = result
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None, caches=None):
         B, T = idx.shape
@@ -70,26 +91,11 @@ class GraphModule(nn.Module):
                 if to_id == node_id:
                     inputs[to_port] = values[(from_id, from_port)]
 
-            # kv_cache needs special handling for cache state
-            if node_type == "kv_cache":
-                cache_val = caches["kv"].get(node_id)
-                result = module(inputs["k"], inputs["v"], cache_val)
-                k_out, v_out, new_cache = result
-                values[(node_id, "k")] = k_out
-                values[(node_id, "v")] = v_out
-                new_caches[node_id] = new_cache
-                continue
-
-            # call forward with kwargs so port names match parameter names
-            result = module(**inputs)
-
-            # store outputs keyed by port name
-            outputs = self.node_outputs[node_id]
-            if isinstance(result, tuple):  # multiple tensor outputs
-                for port, val in zip(outputs, result):
-                    values[(node_id, port)] = val
-            else:  # single tensor output
-                values[(node_id, outputs[0])] = result
+            if self.profile:
+                with record_function(f"node::{node_id}"):
+                    self._exec_node(node_id, node_type, module, inputs, caches, new_caches, values)
+            else:
+                self._exec_node(node_id, node_type, module, inputs, caches, new_caches, values)
 
         # find lm_head output for logits
         lm_head_ids = [nid for nid, nt in self.node_types.items() if nt == "lm_head"]

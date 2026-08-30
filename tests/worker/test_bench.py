@@ -7,8 +7,10 @@ from server.models.graph import GraphSpec
 from tests.server.graph_factory import default_gpt_graph
 from worker.bench import (
     BenchResult,
+    ProfileResult,
     TimingResult,
     bench_graph,
+    profile_graph,
     run_benchmark,
 )
 from worker.worker import Worker
@@ -199,3 +201,68 @@ class TestBenchFlag:
         assert "bench" not in result
         assert "tokens" in result
         assert len(result["tokens"]) == 5
+
+
+class TestProfileGraph:
+    def test_decode_returns_node_percentages(self):
+        model, _ = _compile(default_gpt_graph(**TINY))
+        result = profile_graph(
+            model,
+            torch.device("cpu"),
+            mode="decode",
+            prompt_tokens=4,
+            new_tokens=4,
+            batch_size=1,
+            warmup=1,
+        )
+        assert isinstance(result, ProfileResult)
+        assert len(result.nodes) > 0
+        assert result.total_us > 0
+        total_pct = sum(n.pct for n in result.nodes)
+        assert abs(total_pct - 100.0) < 0.1
+        assert result.nodes[0].pct >= result.nodes[-1].pct
+        assert all(n.node_id for n in result.nodes)
+
+    def test_train_returns_node_percentages(self):
+        model, _ = _compile(default_gpt_graph(**TINY))
+        result = profile_graph(
+            model,
+            torch.device("cpu"),
+            mode="train",
+            batch_size=2,
+            warmup=1,
+        )
+        assert isinstance(result, ProfileResult)
+        assert len(result.nodes) > 0
+        assert not model.training
+
+    def test_profile_flag_reset_after_run(self):
+        model, _ = _compile(default_gpt_graph(**TINY))
+        assert not model.profile
+        profile_graph(
+            model,
+            torch.device("cpu"),
+            mode="decode",
+            prompt_tokens=4,
+            new_tokens=4,
+            batch_size=1,
+            warmup=1,
+        )
+        assert not model.profile
+
+    def test_profile_flag_reset_on_error(self):
+        model, _ = _compile(default_gpt_graph(**TINY))
+        model.profile = False
+        try:
+            profile_graph(
+                model,
+                torch.device("cpu"),
+                mode="decode",
+                prompt_tokens=4,
+                new_tokens=0,
+                batch_size=1,
+                warmup=0,
+            )
+        except Exception:
+            pass
+        assert not model.profile
