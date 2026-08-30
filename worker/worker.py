@@ -107,7 +107,22 @@ class Worker:
 
         self._structure_hash = new_hash
         result["device"] = str(self.device)
+        result["model_info"] = self._model_info()
         return result
+
+    def _model_info(self) -> dict:
+        param_count = sum(p.numel() for p in self.model.parameters())
+        weight_bytes = sum(p.numel() * p.element_size() for p in self.model.parameters())
+        meta = self.model.meta
+        return {
+            "param_count": param_count,
+            "weight_bytes": weight_bytes,
+            "vocab_size": meta["vocab_size"],
+            "block_size": meta["block_size"],
+            "n_layer": meta.get("n_layer"),
+            "n_head": meta.get("n_head"),
+            "n_embd": meta.get("n_embd"),
+        }
 
     def _recompile_with_weights(self, new_graph: GraphSpec, pretrained_state: dict):
         self.model = self.compiler.compile(new_graph, pretrained_state=pretrained_state)
