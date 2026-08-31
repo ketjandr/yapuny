@@ -120,7 +120,7 @@ def profile_graph(
         for evt in prof.key_averages():
             if evt.key.startswith("node::"):
                 node_id = evt.key[6:]
-                us = evt.self_cuda_time_total if use_cuda else evt.self_cpu_time_total
+                us = evt.self_device_time_total if use_cuda else evt.self_cpu_time_total
                 node_times[node_id] = node_times.get(node_id, 0) + us
 
         total = sum(node_times.values()) or 1.0

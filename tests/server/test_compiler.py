@@ -217,9 +217,9 @@ class TestQuantizationCompiler:
         g = default_gpt_graph(**TINY)
         _quantize_nodes(g, ["b0_mlp_up", "b0_mlp_down"], "w8")
         q_model = compiler.compile(GraphSpec.from_dict(g), pretrained_state=pretrained)
-        q_model.eval()
+        q_model.eval().cuda()
 
-        idx = torch.randint(0, TINY["vocab_size"], (1, 4))
+        idx = torch.randint(0, TINY["vocab_size"], (1, 4), device="cuda")
         logits, _, _ = q_model(idx)
         assert logits.shape == (1, 4, TINY["vocab_size"])
 
@@ -233,9 +233,9 @@ class TestQuantizationCompiler:
         g = default_gpt_graph(**TINY)
         _quantize_nodes(g, ["b0_mlp_up"], "w4")
         q_model = compiler.compile(GraphSpec.from_dict(g), pretrained_state=pretrained)
-        q_model.eval()
+        q_model.eval().cuda()
 
-        idx = torch.randint(0, TINY["vocab_size"], (1, 4))
+        idx = torch.randint(0, TINY["vocab_size"], (1, 4), device="cuda")
         logits, _, _ = q_model(idx)
         assert logits.shape == (1, 4, TINY["vocab_size"])
 
@@ -243,15 +243,15 @@ class TestQuantizationCompiler:
     def test_quantized_output_close_to_fp32(self, compiler):
         graph = GraphSpec.from_dict(default_gpt_graph(**TINY))
         model = compiler.compile(graph)
-        model.eval()
+        model.eval().cuda()
         pretrained = model.state_dict()
 
         g = default_gpt_graph(**TINY)
         _quantize_nodes(g, ["b0_mlp_up"], "w8")
         q_model = compiler.compile(GraphSpec.from_dict(g), pretrained_state=pretrained)
-        q_model.eval()
+        q_model.eval().cuda()
 
-        idx = torch.randint(0, TINY["vocab_size"], (1, 4))
+        idx = torch.randint(0, TINY["vocab_size"], (1, 4), device="cuda")
         with torch.no_grad():
             fp32_logits, _, _ = model(idx)
             q_logits, _, _ = q_model(idx)
@@ -268,9 +268,9 @@ class TestQuantizationCompiler:
         g = default_gpt_graph(**TINY)
         _quantize_nodes(g, ["b0_qkv", "b0_out_proj", "b0_mlp_up", "b0_mlp_down", "lm_head"], "w8")
         q_model = compiler.compile(GraphSpec.from_dict(g), pretrained_state=pretrained)
-        q_model.eval()
+        q_model.eval().cuda()
 
-        idx = torch.randint(0, TINY["vocab_size"], (1, 4))
+        idx = torch.randint(0, TINY["vocab_size"], (1, 4), device="cuda")
         logits, _, _ = q_model(idx)
         assert logits.shape == (1, 4, TINY["vocab_size"])
 
