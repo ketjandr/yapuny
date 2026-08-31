@@ -117,10 +117,10 @@ def profile_graph(
                 torch.cuda.synchronize(device)
 
         node_times: dict[str, float] = {}
-        for evt in prof.key_averages():
-            if evt.key.startswith("node::"):
-                node_id = evt.key[6:]
-                us = evt.device_time * evt.count if use_cuda else evt.self_cpu_time_total
+        for evt in prof.profiler.function_events:
+            if evt.name.startswith("node::"):
+                node_id = evt.name[6:]
+                us = evt.self_cuda_time_total if use_cuda else evt.self_cpu_time_total
                 node_times[node_id] = node_times.get(node_id, 0) + us
 
         total = sum(node_times.values()) or 1.0
