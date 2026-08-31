@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import statistics
+import time
 from dataclasses import dataclass, field
 
 import torch
@@ -48,6 +49,54 @@ def _timing_result(samples: list[float]) -> TimingResult:
     )
 
 
+def _profile_nodes(model: GraphModule, run, device: torch.device) -> dict[str, float]:
+    """Time each node in microseconds via forward hooks - CUDA events on GPU, wall clock on CPU."""
+    use_cuda = device.type == "cuda"
+    times: dict[str, float] = {}
+    starts: dict[str, object] = {}
+    pending: list[tuple[str, torch.cuda.Event, torch.cuda.Event]] = []
+    handles = []
+
+    def hooks_for(nid):
+        if use_cuda:
+
+            def pre(module, args):
+                ev = torch.cuda.Event(enable_timing=True)
+                ev.record()
+                starts[nid] = ev
+
+            def post(module, args, output):
+                ev = torch.cuda.Event(enable_timing=True)
+                ev.record()
+                pending.append((nid, starts[nid], ev))
+        else:
+
+            def pre(module, args):
+                starts[nid] = time.perf_counter()
+
+            def post(module, args, output):
+                times[nid] = times.get(nid, 0) + (time.perf_counter() - starts[nid]) * 1e6
+
+        return pre, post
+
+    for nid, module in model.node_modules.items():
+        pre, post = hooks_for(nid)
+        handles.append(module.register_forward_pre_hook(pre))
+        handles.append(module.register_forward_hook(post))
+
+    try:
+        run()
+        if use_cuda:
+            torch.cuda.synchronize(device)
+            for nid, start, end in pending:
+                times[nid] = times.get(nid, 0) + start.elapsed_time(end) * 1000  # ms to us
+    finally:
+        for h in handles:
+            h.remove()
+
+    return times
+
+
 @dataclass
 class NodeProfile:
     node_id: str
@@ -75,68 +124,48 @@ def profile_graph(
     vocab_size = model.meta["vocab_size"]
     use_cuda = device.type == "cuda"
 
-    model.profile = True
+    if mode == "train":
+        model.train()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
-    try:
-        if mode == "train":
-            model.train()
-            optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+        def run():
+            x = torch.randint(0, vocab_size, (batch_size, block_size), device=device)
+            y = torch.randint(0, vocab_size, (batch_size, block_size), device=device)
+            _, loss, _ = model(x, y)
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            optimizer.step()
+    else:
+        model.eval()
 
-            def run():
-                x = torch.randint(0, vocab_size, (batch_size, block_size), device=device)
-                y = torch.randint(0, vocab_size, (batch_size, block_size), device=device)
-                _, loss, _ = model(x, y)
-                optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                optimizer.step()
-        else:
-            model.eval()
+        def run():
+            idx = torch.randint(0, vocab_size, (batch_size, prompt_tokens), device=device)
+            logits, _, caches = model(idx[:, -block_size:])
+            for step in range(new_tokens):
+                next_id = logits[:, -1, :].argmax(dim=-1, keepdim=True)
+                idx = torch.cat((idx, next_id), dim=1)
+                if step == new_tokens - 1:
+                    break
+                logits, _, _ = model(idx[:, -block_size:])
 
-            def run():
-                idx = torch.randint(0, vocab_size, (batch_size, prompt_tokens), device=device)
-                logits, _, caches = model(idx[:, -block_size:])
-                for step in range(new_tokens):
-                    next_id = logits[:, -1, :].argmax(dim=-1, keepdim=True)
-                    idx = torch.cat((idx, next_id), dim=1)
-                    if step == new_tokens - 1:
-                        break
-                    logits, _, _ = model(idx[:, -block_size:])
+    for _ in range(warmup):
+        run()
+    if use_cuda:
+        torch.cuda.synchronize(device)
 
-        for _ in range(warmup):
-            run()
-        if use_cuda:
-            torch.cuda.synchronize(device)
+    node_times = _profile_nodes(model, run, device)
 
-        activities = [torch.profiler.ProfilerActivity.CPU]
-        if use_cuda:
-            activities.append(torch.profiler.ProfilerActivity.CUDA)
+    total = sum(node_times.values()) or 1.0
+    nodes = sorted(
+        [
+            NodeProfile(node_id=nid, self_us=us, pct=us / total * 100)
+            for nid, us in node_times.items()
+        ],
+        key=lambda n: n.self_us,
+        reverse=True,
+    )
 
-        with torch.profiler.profile(activities=activities) as prof:
-            run()
-            if use_cuda:
-                torch.cuda.synchronize(device)
+    if mode == "train":
+        model.eval()
 
-        node_times: dict[str, float] = {}
-        for evt in prof.profiler.function_events:
-            if evt.name.startswith("node::"):
-                node_id = evt.name[6:]
-                us = evt.self_cuda_time_total if use_cuda else evt.self_cpu_time_total
-                node_times[node_id] = node_times.get(node_id, 0) + us
-
-        total = sum(node_times.values()) or 1.0
-        nodes = sorted(
-            [
-                NodeProfile(node_id=nid, self_us=us, pct=us / total * 100)
-                for nid, us in node_times.items()
-            ],
-            key=lambda n: n.self_us,
-            reverse=True,
-        )
-
-        if mode == "train":
-            model.eval()
-
-        return ProfileResult(nodes=nodes, total_us=total, env=_collect_env(device))
-
-    finally:
-        model.profile = False
+    return ProfileResult(nodes=nodes, total_us=total, env=_collect_env(device))

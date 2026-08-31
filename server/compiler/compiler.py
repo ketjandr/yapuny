@@ -4,7 +4,6 @@ from dataclasses import asdict
 
 import torch
 import torch.nn as nn
-from torch.autograd.profiler import record_function
 from torch.nn import functional as F
 
 from server.compiler.fusion_registry import apply_fusion
@@ -42,10 +41,9 @@ class GraphModule(nn.Module):
         self.node_types = node_types
         self.node_outputs = node_outputs
         self.meta = meta
-        self.profile = False
 
     def _exec_node(self, node_id, node_type, module, inputs, caches, new_caches, values):
-        """Run one node and store its outputs. Split out so record_function can wrap it cleanly."""
+        """Run one node and store its outputs."""
         if node_type == "kv_cache":
             cache_val = caches["kv"].get(node_id)
             k_out, v_out, new_cache = module(inputs["k"], inputs["v"], cache_val)
@@ -91,11 +89,7 @@ class GraphModule(nn.Module):
                 if to_id == node_id:
                     inputs[to_port] = values[(from_id, from_port)]
 
-            if self.profile:
-                with record_function(f"node::{node_id}"):
-                    self._exec_node(node_id, node_type, module, inputs, caches, new_caches, values)
-            else:
-                self._exec_node(node_id, node_type, module, inputs, caches, new_caches, values)
+            self._exec_node(node_id, node_type, module, inputs, caches, new_caches, values)
 
         # find lm_head output for logits
         lm_head_ids = [nid for nid, nt in self.node_types.items() if nt == "lm_head"]
