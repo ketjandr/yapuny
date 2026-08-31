@@ -16,7 +16,12 @@ from data.tokenizer import (
     train_tokenizer,
 )
 from server.compiler.compiler import GraphCompiler, cache_length
-from server.compiler.utils import graph_full_hash, graph_structure_hash
+from server.compiler.utils import (
+    graph_full_hash,
+    graph_structure_hash,
+    has_inference_opts,
+    strip_inference_opts,
+)
 from server.models.graph import GraphSpec
 from worker import store
 
@@ -27,7 +32,7 @@ MAX_CORPUS_BYTES = 10 * 1024 * 1024  # 10 MB cap
 
 
 @dataclass
-class CacheEntry:
+class ModelCacheEntry:
     """One compiled model held in memory, addressed by its frontend model id.
     tokenizer is None until the model is trained (also serves as the 'trained' flag)."""
 
@@ -44,7 +49,7 @@ class Worker:
         self.compiler = GraphCompiler()
         # compiled-model cache (in-memory, per worker), addressed by model id.
         # This is the worker's only model state - there is no implicit "active" model.
-        self.cache: dict[str, CacheEntry] = {}
+        self.cache: dict[str, ModelCacheEntry] = {}
         self.training = False
         self.training_id = None
         self.train_state = None
@@ -123,7 +128,7 @@ class Worker:
         model.to(self.device)
         model.eval()
 
-        self.cache[model_id] = CacheEntry(full_hash, struct_hash, graph, model, tokenizer)
+        self.cache[model_id] = ModelCacheEntry(full_hash, struct_hash, graph, model, tokenizer)
 
         return {
             "status": "compiled",
@@ -172,10 +177,6 @@ class Worker:
             "quantized_nodes": quantized if quantized else None,
         }
 
-    @staticmethod
-    def _has_quantized_nodes(graph: GraphSpec) -> bool:
-        return any(n.quantized for n in graph.nodes)
-
     def train(
         self,
         model_id: str,
@@ -193,13 +194,22 @@ class Worker:
         if self.training:
             return {"error": "training already in progress"}
 
-        if self._has_quantized_nodes(entry.graph):
-            return {"error": "cannot train a quantized model"}
-
         if not TOKENIZER_PATH.exists() or not (DATA_DIR / "train.bin").exists():
             return {"error": "no data prepared - upload a corpus and prepare data first"}
 
-        model = entry.model
+        # fusion/quantization are inference-only (currently their kernels have no backward)
+        # so training runs on the stripped "plain" graph
+        has_opts = has_inference_opts(entry.graph)
+        if has_opts:
+            plain_graph = strip_inference_opts(entry.graph)
+            pkg = store.load(model_id)
+            match = pkg is not None and pkg.structure_hash == entry.structure_hash
+            pretrained = pkg.weights if match else None
+            model = self.compiler.compile(plain_graph, pretrained_state=pretrained).to(self.device)
+        else:
+            plain_graph = entry.graph
+            model = entry.model
+
         block_size = model.meta["block_size"]
         model.train()
         self.training = True
@@ -301,13 +311,21 @@ class Worker:
                     },
                 }
 
-            # commit the trained package to the locker, keyed by this model id
-            unfused = self._unfused_state(model, entry.graph)
+            # commit the trained (plain fp32, unfused) weights to the locker
+            unfused = self._unfused_state(model, plain_graph)
             tokenizer = load_tokenizer(TOKENIZER_PATH)
             store.save(model_id, tokenizer, unfused, entry.structure_hash)
 
-            # the tokenizer now rides with this model; refresh the cached entry in place
-            entry.tokenizer = tokenizer
+            # refresh the cache so inference is ready with no user recompile
+            if has_opts:
+                inference_model = self.compiler.compile(entry.graph, pretrained_state=unfused)
+                inference_model.to(self.device)
+                inference_model.eval()
+                self.cache[model_id] = ModelCacheEntry(
+                    entry.full_hash, entry.structure_hash, entry.graph, inference_model, tokenizer
+                )
+            else:
+                entry.tokenizer = tokenizer
             self.train_state["saved"] = model_id
 
         finally:
@@ -329,7 +347,10 @@ class Worker:
         return self.train_state
 
     def _unfused_state(self, model, graph: GraphSpec) -> dict:
-        """Return trained weights in unfused form so any graph variant can reload them."""
+        """Return trained weights in unfused form so any graph variant can reload them.
+        Storage-boundary guard: keeps stored weights canonical/unfused. Training currently
+        always passes a plain graph (fast path); the fusion branch is the unfuse step that
+        TODO: fused training will reuse (train fused -> unfuse for storage)."""
         if not graph.fusion_groups:
             return model.state_dict()
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict
+from copy import deepcopy
 from dataclasses import asdict
 
 from server.models.graph import GraphSpec
@@ -72,3 +73,17 @@ def graph_full_hash(graph: GraphSpec) -> str:
     fusion = sorted(sorted(fg.nodes) for fg in graph.fusion_groups)
     blob = json.dumps([nodes, edges, meta, fusion], default=str).encode()
     return hashlib.sha256(blob).hexdigest()
+
+
+def has_inference_opts(graph: GraphSpec) -> bool:
+    """Whether the graph carries inference-only transforms (fusion or quantization)."""
+    return bool(graph.fusion_groups) or any(n.quantized for n in graph.nodes)
+
+
+def strip_inference_opts(graph: GraphSpec) -> GraphSpec:
+    """Derive the training graph by stripping inference-only operations."""
+    plain = deepcopy(graph)
+    plain.fusion_groups = []
+    for n in plain.nodes:
+        n.quantized = None
+    return plain

@@ -4,10 +4,9 @@ import torch
 from server.compiler.compiler import GraphCompiler
 from server.compiler.fusion_registry import FUSION_AVAILABLE
 from server.compiler.quantization_registry import QUANTIZATION_AVAILABLE
-from server.compiler.utils import graph_full_hash, graph_structure_hash
+from server.compiler.utils import graph_structure_hash
 from server.models.graph import GraphSpec
 from tests.server.graph_factory import default_gpt_graph
-from worker.worker import CacheEntry
 
 requires_cuda = pytest.mark.skipif(
     not torch.cuda.is_available(),
@@ -294,32 +293,20 @@ class TestQuantizationCompiler:
 
         assert total_q < fp32_bytes
 
-    @requires_quantization
-    def test_train_rejects_quantized_model(self, compiler):
-        from worker.worker import Worker
-
-        graph = GraphSpec.from_dict(default_gpt_graph(**TINY))
-        model = compiler.compile(graph)
-        model.eval()
-        pretrained = model.state_dict()
+    def test_training_graph_strips_inference_opts(self):
+        # training runs on a plain copy: fusion + quantization stripped, original untouched.
+        from server.compiler.utils import strip_inference_opts
 
         g_dict = default_gpt_graph(**TINY)
         _quantize_nodes(g_dict, ["b0_mlp_up"], "w8")
-        q_graph = GraphSpec.from_dict(g_dict)
-        q_model = compiler.compile(q_graph, pretrained_state=pretrained)
-        q_model.eval()
+        g_dict["fusion_groups"] = [{"nodes": ["b0_resid_drop1", "b0_res1"]}]
+        graph = GraphSpec.from_dict(g_dict)
 
-        w = Worker.__new__(Worker)
-        w.device = torch.device("cpu")
-        w.training = False
-        w.training_id = None
-        w.train_state = None
-        w.cache = {
-            "q": CacheEntry(
-                graph_full_hash(q_graph), graph_structure_hash(q_graph), q_graph, q_model, None
-            )
-        }
+        plain = strip_inference_opts(graph)
 
-        result = w.train("q", max_steps=10)
-        assert "error" in result
-        assert "quantized" in result["error"]
+        # stripped copy has neither fusion nor quant
+        assert plain.fusion_groups == []
+        assert all(n.quantized is None for n in plain.nodes)
+        # original is untouched
+        assert graph.fusion_groups
+        assert any(n.quantized for n in graph.nodes)

@@ -3,7 +3,7 @@ import torch
 from server.compiler.utils import graph_full_hash, graph_structure_hash
 from server.models.graph import GraphSpec
 from tests.server.graph_factory import default_gpt_graph
-from worker.worker import CacheEntry, Worker
+from worker.worker import ModelCacheEntry, Worker
 
 TINY = dict(n_layer=2, n_head=2, n_embd=32, block_size=16, vocab_size=64)
 PROMPT = [1, 2, 3, 4]
@@ -16,7 +16,9 @@ def _worker(graph_dict, pretrained=None):
     spec = GraphSpec.from_dict(graph_dict)
     model = w.compiler.compile(spec, pretrained_state=pretrained).to(w.device)
     model.eval()
-    w.cache[MID] = CacheEntry(graph_full_hash(spec), graph_structure_hash(spec), spec, model, None)
+    w.cache[MID] = ModelCacheEntry(
+        graph_full_hash(spec), graph_structure_hash(spec), spec, model, None
+    )
     return w
 
 
