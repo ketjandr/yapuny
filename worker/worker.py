@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import statistics
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -15,25 +16,37 @@ from data.tokenizer import (
     train_tokenizer,
 )
 from server.compiler.compiler import GraphCompiler, cache_length
-from server.compiler.utils import graph_structure_hash
+from server.compiler.utils import graph_full_hash, graph_structure_hash
 from server.models.graph import GraphSpec
+from worker import store
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 RAW_DIR = DATA_DIR / "raw"
 TOKENIZER_PATH = DATA_DIR / "yapuny_tokenizer.json"
-CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / "checkpoints"
 MAX_CORPUS_BYTES = 10 * 1024 * 1024  # 10 MB cap
+
+
+@dataclass
+class CacheEntry:
+    """One compiled model held in memory, addressed by its frontend model id.
+    tokenizer is None until the model is trained (also serves as the 'trained' flag)."""
+
+    full_hash: str
+    structure_hash: str
+    graph: GraphSpec
+    model: object
+    tokenizer: object | None
 
 
 class Worker:
     def __init__(self, device: str = "cuda"):
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.compiler = GraphCompiler()
-        self.model = None
-        self.graph = None
-        self._structure_hash = None
-        self._weight_store: dict[str, dict] = {}
+        # compiled-model cache (in-memory, per worker), addressed by model id.
+        # This is the worker's only model state - there is no implicit "active" model.
+        self.cache: dict[str, CacheEntry] = {}
         self.training = False
+        self.training_id = None
         self.train_state = None
 
     def upload_corpus(self, content: bytes, filename: str):
@@ -90,35 +103,63 @@ class Worker:
             "val_tokens": len(val_arr),
         }
 
-    def compile_graph(self, graph_data: dict):
-        new_graph = GraphSpec.from_dict(graph_data)
-        new_hash = graph_structure_hash(new_graph)
+    def compile_model(self, model_id: str, graph_data: dict):
+        """Build the runnable model, loading trained weights from the
+        locker if the architecture matches, and cache it by id."""
+        graph = GraphSpec.from_dict(graph_data)
+        full_hash = graph_full_hash(graph)
+        struct_hash = graph_structure_hash(graph)
 
-        pretrained = self._weight_store.get(new_hash) or self._load_checkpoint(new_hash)
-
-        if pretrained is not None:
-            result = self._recompile_with_weights(new_graph, pretrained)
+        pkg = store.load(model_id)
+        if pkg is not None and pkg.structure_hash == struct_hash:
+            model = self.compiler.compile(graph, pretrained_state=pkg.weights)
+            tokenizer = pkg.tokenizer
+            weights = "loaded"
         else:
-            self.graph = new_graph
-            self.model = self.compiler.compile(self.graph)
-            self.model.to(self.device)
-            self.model.eval()
-            result = {"status": "compiled", "weights": "reinitialized"}
+            model = self.compiler.compile(graph)
+            tokenizer = None
+            weights = "reinitialized"
 
-        self._structure_hash = new_hash
-        result["device"] = str(self.device)
-        result["model_info"] = self._model_info()
-        return result
+        model.to(self.device)
+        model.eval()
 
-    def _model_info(self) -> dict:
-        param_count = sum(p.numel() for p in self.model.parameters())
-        weight_bytes = sum(p.numel() * p.element_size() for p in self.model.parameters())
-        meta = self.model.meta
-        quantized = {}
-        if self.graph:
-            for n in self.graph.nodes:
-                if n.quantized:
-                    quantized[n.id] = n.quantized
+        self.cache[model_id] = CacheEntry(full_hash, struct_hash, graph, model, tokenizer)
+
+        return {
+            "status": "compiled",
+            "weights": weights,
+            "trained": tokenizer is not None,
+            "device": str(self.device),
+            "model_info": self._model_info(model, graph),
+        }
+
+    def model_status(self, model_id: str, graph_data: dict):
+        """Readiness check for a graph context (canvas) switch."""
+        full_hash = graph_full_hash(GraphSpec.from_dict(graph_data))
+
+        entry = self.cache.get(model_id)
+        if entry is None or entry.full_hash != full_hash:
+            return {"status": "needs_compile"}
+
+        return {
+            "status": "ready",
+            "trained": entry.tokenizer is not None,
+            "model_info": self._model_info(entry.model, entry.graph),
+        }
+
+    def delete_model(self, model_id: str):
+        self.cache.pop(model_id, None)
+        existed = store.delete(model_id)
+        return {"status": "deleted" if existed else "not_found"}
+
+    def list_models(self):
+        return store.list_ids()
+
+    def _model_info(self, model, graph: GraphSpec) -> dict:
+        param_count = sum(p.numel() for p in model.parameters())
+        weight_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
+        meta = model.meta
+        quantized = {n.id: n.quantized for n in graph.nodes if n.quantized}
 
         return {
             "param_count": param_count,
@@ -131,52 +172,38 @@ class Worker:
             "quantized_nodes": quantized if quantized else None,
         }
 
-    def _has_quantized_nodes(self) -> bool:
-        if not self.graph:
-            return False
-        return any(n.quantized for n in self.graph.nodes)
-
-    def _recompile_with_weights(self, new_graph: GraphSpec, pretrained_state: dict):
-        self.model = self.compiler.compile(new_graph, pretrained_state=pretrained_state)
-        self.model.to(self.device)
-        self.model.eval()
-        self.graph = new_graph
-        return {"status": "compiled", "weights": "preserved"}
-
-    def _checkpoint_path(self, structure_hash: str) -> Path:
-        return CHECKPOINT_DIR / f"{structure_hash[:12]}.pt"
-
-    def _load_checkpoint(self, structure_hash: str) -> dict | None:
-        path = self._checkpoint_path(structure_hash)
-        if not path.exists():
-            return None
-        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
-        state = checkpoint["model"]
-        self._weight_store[structure_hash] = state
-        return state
+    @staticmethod
+    def _has_quantized_nodes(graph: GraphSpec) -> bool:
+        return any(n.quantized for n in graph.nodes)
 
     def train(
         self,
+        model_id: str,
         max_steps: int = 2000,
         batch_size: int = 32,
         learning_rate: float = 3e-4,
         eval_interval: int = 200,
         eval_iters: int = 50,
-        checkpoint_path: str | None = None,
         bench: bool = False,
     ):
-        if self.model is None:
-            return {"error": "no model compiled"}
+        entry = self.cache.get(model_id)
+        if entry is None:
+            return {"error": "model not compiled - compile first"}
 
         if self.training:
             return {"error": "training already in progress"}
 
-        if self._has_quantized_nodes():
+        if self._has_quantized_nodes(entry.graph):
             return {"error": "cannot train a quantized model"}
 
-        block_size = self.model.meta["block_size"]
-        self.model.train()
+        if not TOKENIZER_PATH.exists() or not (DATA_DIR / "train.bin").exists():
+            return {"error": "no data prepared - upload a corpus and prepare data first"}
+
+        model = entry.model
+        block_size = model.meta["block_size"]
+        model.train()
         self.training = True
+        self.training_id = model_id
         self.train_state = {
             "step": 0,
             "max_steps": max_steps,
@@ -185,7 +212,7 @@ class Worker:
             "status": "running",
         }
 
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
         if bench:
             fwd_times: list[float] = []
@@ -201,7 +228,7 @@ class Worker:
 
                 # eval
                 if step % eval_interval == 0:
-                    losses = self._estimate_loss(block_size, batch_size, eval_iters)
+                    losses = self._estimate_loss(model, block_size, batch_size, eval_iters)
                     self.train_state.update(
                         {
                             "step": step,
@@ -216,7 +243,7 @@ class Worker:
                 if bench:
                     t0 = self._stamp()
 
-                _, loss, _ = self.model(x, y)
+                _, loss, _ = model(x, y)
 
                 if bench:
                     t_fwd = self._stamp()
@@ -241,7 +268,7 @@ class Worker:
             self.train_state["status"] = "completed"
 
             # final eval
-            losses = self._estimate_loss(block_size, batch_size, eval_iters)
+            losses = self._estimate_loss(model, block_size, batch_size, eval_iters)
             self.train_state["train_loss"] = losses["train"]
             self.train_state["val_loss"] = losses["val"]
 
@@ -257,7 +284,7 @@ class Worker:
                     peak_vram = torch.cuda.max_memory_allocated(self.device) / (1024 * 1024)
 
                 profile = profile_graph(
-                    model=self.model,
+                    model=model,
                     device=self.device,
                     mode="train",
                     warmup=1,
@@ -274,20 +301,19 @@ class Worker:
                     },
                 }
 
-            # save checkpoint keyed by structure hash
-            self._snapshot_unfused_state()
-            if checkpoint_path is None:
-                CHECKPOINT_DIR.mkdir(exist_ok=True)
-                path = self._checkpoint_path(self._structure_hash)
-            else:
-                path = Path(checkpoint_path)
-                path.parent.mkdir(exist_ok=True)
-            torch.save({"model": self._weight_store[self._structure_hash]}, path)
-            self.train_state["checkpoint"] = str(path)
+            # commit the trained package to the locker, keyed by this model id
+            unfused = self._unfused_state(model, entry.graph)
+            tokenizer = load_tokenizer(TOKENIZER_PATH)
+            store.save(model_id, tokenizer, unfused, entry.structure_hash)
+
+            # the tokenizer now rides with this model; refresh the cached entry in place
+            entry.tokenizer = tokenizer
+            self.train_state["saved"] = model_id
 
         finally:
             self.training = False
-            self.model.eval()
+            self.training_id = None
+            model.eval()
 
         return self.train_state
 
@@ -302,40 +328,39 @@ class Worker:
             return {"status": "idle"}
         return self.train_state
 
-    def _snapshot_unfused_state(self):
-        """Save trained weights in unfused form into the weight store."""
-        if not self.graph.fusion_groups:
-            self._weight_store[self._structure_hash] = self.model.state_dict()
-            return
+    def _unfused_state(self, model, graph: GraphSpec) -> dict:
+        """Return trained weights in unfused form so any graph variant can reload them."""
+        if not graph.fusion_groups:
+            return model.state_dict()
 
         from copy import deepcopy
 
-        node_types = {n.id: n.type for n in self.graph.nodes}
+        node_types = {n.id: n.type for n in graph.nodes}
 
         fused_node_ids = set()
-        for fg in self.graph.fusion_groups:
+        for fg in graph.fusion_groups:
             fused_node_ids.update(fg.nodes)
 
-        unfused_graph = deepcopy(self.graph)
+        unfused_graph = deepcopy(graph)
         unfused_graph.fusion_groups = []
         unfused_model = self.compiler.compile(unfused_graph)
 
         for nid in unfused_model.node_modules:
             if nid not in fused_node_ids:
-                src = self.model.node_modules[nid]
+                src = model.node_modules[nid]
                 dst = unfused_model.node_modules[nid]
                 dst.load_state_dict(src.state_dict())
 
-        for fg in self.graph.fusion_groups:
+        for fg in graph.fusion_groups:
             fused_id = "_fused_" + "_".join(fg.nodes)
-            fused_module = self.model.node_modules[fused_id]
+            fused_module = model.node_modules[fused_id]
 
             unfused_nodes = {node_types[nid]: unfused_model.node_modules[nid] for nid in fg.nodes}
 
             if hasattr(fused_module, "save_to_nodes"):
                 fused_module.save_to_nodes(unfused_nodes)
 
-        self._weight_store[self._structure_hash] = unfused_model.state_dict()
+        return unfused_model.state_dict()
 
     def _stamp(self) -> float:
         if self.device.type == "cuda":
@@ -354,17 +379,17 @@ class Worker:
         return x.to(self.device), y.to(self.device)
 
     @torch.no_grad()
-    def _estimate_loss(self, block_size: int, batch_size: int, eval_iters: int):
-        self.model.eval()
+    def _estimate_loss(self, model, block_size: int, batch_size: int, eval_iters: int):
+        model.eval()
         out = {}
         for split in ["train", "val"]:
             losses = torch.zeros(eval_iters)
             for i in range(eval_iters):
                 x, y = self._get_batch(split, block_size, batch_size)
-                _, loss, _ = self.model(x, y)
+                _, loss, _ = model(x, y)
                 losses[i] = loss.item()
             out[split] = losses.mean().item()
-        self.model.train()
+        model.train()
         return out
 
     def _sample(self, logits, temperature, top_k):
@@ -377,6 +402,7 @@ class Worker:
 
     def generate(
         self,
+        model_id: str,
         prompt_ids: list[int],
         max_new_tokens: int = 50,
         temperature: float = 1.0,
@@ -385,6 +411,7 @@ class Worker:
     ):
         result = None
         for event in self.generate_stream(
+            model_id=model_id,
             prompt_ids=prompt_ids,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
@@ -397,23 +424,37 @@ class Worker:
                 result = event["data"]
         return result
 
-    @torch.no_grad()
     def generate_stream(
         self,
+        model_id: str,
         prompt_ids: list[int],
         max_new_tokens: int = 50,
         temperature: float = 1.0,
         top_k: int | None = None,
         bench: bool = False,
     ):
-        if self.model is None:
-            yield {"event": "error", "data": {"error": "no model compiled"}}
+        entry = self.cache.get(model_id)
+        if entry is None:
+            yield {"event": "error", "data": {"error": "model not compiled"}}
             return
+        yield from self._stream_tokens(
+            entry.model, entry.tokenizer, prompt_ids, max_new_tokens, temperature, top_k, bench
+        )
 
-        tok = load_tokenizer(TOKENIZER_PATH) if TOKENIZER_PATH.exists() else None
-
+    @torch.no_grad()
+    def _stream_tokens(
+        self,
+        model,
+        tok,
+        prompt_ids: list[int],
+        max_new_tokens: int = 50,
+        temperature: float = 1.0,
+        top_k: int | None = None,
+        bench: bool = False,
+    ):
+        """Pure generation over an explicit (model, tokenizer)."""
         idx = torch.tensor([prompt_ids], device=self.device)
-        block_size = self.model.meta["block_size"]
+        block_size = model.meta["block_size"]
         tokens = []
 
         if bench:
@@ -422,7 +463,7 @@ class Worker:
             t_prefill_start = self._stamp()
 
         # prefill - whole prompt in one pass, seeds the cache if the graph has one
-        logits, _, caches = self.model(idx[:, -block_size:])
+        logits, _, caches = model(idx[:, -block_size:])
 
         if bench:
             t_prefill_end = self._stamp()
@@ -455,10 +496,10 @@ class Worker:
             cached_len = cache_length(caches)
             if cached_len is not None and cached_len < block_size:
                 # decode - feed only the new token, reuse cached k/v
-                logits, _, caches = self.model(next_id, caches=caches)
+                logits, _, caches = model(next_id, caches=caches)
             else:
                 # no kv_cache node, or context window full - recompute the window
-                logits, _, _ = self.model(idx[:, -block_size:])
+                logits, _, _ = model(idx[:, -block_size:])
 
         full_text = decode(tok, tokens) if tok else None
         done_data = {"tokens": tokens, "text": full_text}
@@ -485,7 +526,7 @@ class Worker:
             from worker.bench import profile_graph
 
             result = profile_graph(
-                model=self.model,
+                model=model,
                 device=self.device,
                 mode="decode",
                 prompt_tokens=len(prompt_ids),
@@ -500,17 +541,36 @@ class Worker:
                 },
             }
 
-    def decode_tokens(self, token_ids: list[int]):
-        if not TOKENIZER_PATH.exists():
-            return {"error": "no tokenizer found - prepare data first"}
+    def _tokenizer(self, model_id: str):
+        """Resolve a compiled model's tokenizer, raising if not compiled/trained."""
+        entry = self.cache.get(model_id)
+        if entry is None:
+            raise ValueError("model not compiled - compile first")
+        if entry.tokenizer is None:
+            raise ValueError("model has no tokenizer - train it first")
+        return entry.tokenizer
 
-        tok = load_tokenizer(TOKENIZER_PATH)
-        text = decode(tok, token_ids)
-        return {"text": text}
+    def decode_tokens(self, model_id: str, token_ids: list[int]):
+        try:
+            tok = self._tokenizer(model_id)
+        except ValueError as e:
+            return {"error": str(e)}
+        return {"text": decode(tok, token_ids)}
 
-    def encode_prompt(self, text: str) -> list[int]:
-        if not TOKENIZER_PATH.exists():
-            raise ValueError("no tokenizer found - prepare data first")
+    def encode_prompt(self, model_id: str, text: str) -> list[int]:
+        return encode(self._tokenizer(model_id), text)
 
-        tok = load_tokenizer(TOKENIZER_PATH)
-        return encode(tok, text)
+    def profile(self, model_id: str, mode: str, prompt_tokens: int, new_tokens: int, warmup: int):
+        from worker.bench import profile_graph
+
+        entry = self.cache.get(model_id)
+        if entry is None:
+            return None
+        return profile_graph(
+            model=entry.model,
+            device=self.device,
+            mode=mode,
+            prompt_tokens=prompt_tokens,
+            new_tokens=new_tokens,
+            warmup=warmup,
+        )

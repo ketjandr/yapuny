@@ -9,6 +9,7 @@ from server.api.schemas import (
     GenerateRequest,
     GraphMetaSchema,
     GraphRequest,
+    ModelGraphRequest,
     NodeSchema,
     PrepareDataRequest,
     TrainRequest,
@@ -111,50 +112,49 @@ class TestGraphRequest:
 
 class TestGenerateRequest:
     def test_valid(self):
-        r = GenerateRequest(prompt="hello world")
+        r = GenerateRequest(id="m", prompt="hello world")
         assert r.max_new_tokens == 50
         assert r.temperature == 1.0
         assert r.bench is False
 
     def test_bench_flag(self):
-        r = GenerateRequest(prompt="hello", bench=True)
+        r = GenerateRequest(id="m", prompt="hello", bench=True)
         assert r.bench is True
 
     def test_missing_prompt(self):
         with pytest.raises(ValidationError):
-            GenerateRequest()
+            GenerateRequest(id="m")
 
     def test_extra_field_rejected(self):
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            GenerateRequest(prompt="hi", beam_width=5)
+            GenerateRequest(id="m", prompt="hi", beam_width=5)
 
 
 class TestDecodeRequest:
     def test_valid(self):
-        r = DecodeRequest(token_ids=[1, 2, 3])
+        r = DecodeRequest(id="m", token_ids=[1, 2, 3])
         assert r.token_ids == [1, 2, 3]
 
     def test_missing_token_ids(self):
         with pytest.raises(ValidationError):
-            DecodeRequest()
+            DecodeRequest(id="m")
 
 
 class TestTrainRequest:
     def test_defaults(self):
-        r = TrainRequest()
+        r = TrainRequest(id="m")
         assert r.max_steps == 2000
         assert r.batch_size == 32
         assert r.learning_rate == 3e-4
-        assert r.checkpoint_path is None
         assert r.bench is False
 
     def test_custom(self):
-        r = TrainRequest(max_steps=100, batch_size=8)
+        r = TrainRequest(id="m", max_steps=100, batch_size=8)
         assert r.max_steps == 100
         assert r.batch_size == 8
 
     def test_bench_flag(self):
-        r = TrainRequest(bench=True)
+        r = TrainRequest(id="m", bench=True)
         assert r.bench is True
 
 
@@ -206,10 +206,10 @@ class TestValidateRoute:
 
 
 class TestBenchRunRequest:
-    def _dummy_graph(self):
-        return GraphRequest(**default_gpt_graph(
+    def _dummy_graph(self, model_id="m"):
+        return ModelGraphRequest(id=model_id, graph=GraphRequest(**default_gpt_graph(
             n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64,
-        ))
+        )))
 
     def test_defaults(self):
         r = BenchRunRequest(graphs=[self._dummy_graph()], prompt="hello")
@@ -237,9 +237,9 @@ class TestBenchRunRequest:
 # -- benchmark route tests --
 
 
-def _compile(**kwargs):
+def _compile(model_id="test-model", **kwargs):
     graph = default_gpt_graph(**kwargs)
-    client.post("/api/graph/compile", json=graph)
+    client.post("/api/graph/compile", json={"id": model_id, "graph": graph})
     return graph
 
 
@@ -259,15 +259,40 @@ def _parse_sse(text: str) -> list[dict]:
     return events
 
 
+# bench sits on top of trained models: seed the locker with a package (real state_dict
+# + the committed tokenizer) so bench can load weights by id without actually training.
+def _seed_package(model_id, graph_dict):
+    from data.tokenizer import load_tokenizer
+    from server.compiler.compiler import GraphCompiler
+    from server.compiler.utils import graph_structure_hash
+    from server.models.graph import GraphSpec
+    from worker import store
+    from worker.worker import TOKENIZER_PATH
+
+    spec = GraphSpec.from_dict(graph_dict)
+    model = GraphCompiler().compile(spec)
+    tok = load_tokenizer(TOKENIZER_PATH)
+    store.save(model_id, tok, model.state_dict(), graph_structure_hash(spec))
+
+
+@pytest.fixture
+def isolated_locker(tmp_path, monkeypatch):
+    from worker import store
+
+    monkeypatch.setattr(store, "MODELS_DIR", tmp_path)
+    return tmp_path
+
+
 class TestBenchRoutes:
-    def test_streams_single_graph(self):
-        # vocab_size matches the committed tokenizer so encoded prompt ids are in range
+    # vocab_size matches the committed tokenizer so encoded prompt ids are in range
+    def test_streams_single_graph(self, isolated_locker):
         graph_a = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=8000)
+        _seed_package("m-a", graph_a)
 
         resp = client.post(
             "/api/bench/generate",
             json={
-                "graphs": [graph_a],
+                "graphs": [{"id": "m-a", "graph": graph_a}],
                 "prompt": "abc",
                 "max_new_tokens": 4,
             },
@@ -288,14 +313,16 @@ class TestBenchRoutes:
         assert len(dones) >= 1
         assert "env" in dones[-1]["data"]
 
-    def test_multiple_graphs(self):
+    def test_multiple_graphs(self, isolated_locker):
         graph_v1 = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=8000)
         graph_v2 = default_gpt_graph(n_layer=2, n_head=2, n_embd=32, block_size=16, vocab_size=8000)
+        _seed_package("m-v1", graph_v1)
+        _seed_package("m-v2", graph_v2)
 
         resp = client.post(
             "/api/bench/generate",
             json={
-                "graphs": [graph_v1, graph_v2],
+                "graphs": [{"id": "m-v1", "graph": graph_v1}, {"id": "m-v2", "graph": graph_v2}],
                 "prompt": "abc",
                 "max_new_tokens": 4,
             },
@@ -315,13 +342,28 @@ class TestBenchRoutes:
         dones = [e for e in events if e["event"] == "done"]
         assert any("env" in d["data"] for d in dones)
 
+    def test_untrained_model_errors(self, isolated_locker):
+        graph = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=8000)
+
+        resp = client.post(
+            "/api/bench/generate",
+            json={
+                "graphs": [{"id": "never-trained", "graph": graph}],
+                "prompt": "abc",
+                "max_new_tokens": 4,
+            },
+        )
+        events = _parse_sse(resp.text)
+        errors = [e for e in events if e["event"] == "error"]
+        assert any("not trained" in e["data"]["error"] for e in errors)
+
 
 class TestProfileRoute:
     def test_profile_decode(self):
-        _compile(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        _compile(model_id="prof", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
         resp = client.post(
             "/api/bench/profile",
-            json={"mode": "decode", "prompt_tokens": 4, "new_tokens": 4, "warmup": 1},
+            json={"id": "prof", "mode": "decode", "prompt_tokens": 4, "new_tokens": 4, "warmup": 1},
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -332,28 +374,21 @@ class TestProfileRoute:
         assert abs(total_pct - 100.0) < 0.1
 
     def test_profile_train(self):
-        _compile(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        _compile(model_id="prof", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
         resp = client.post(
             "/api/bench/profile",
-            json={"mode": "train", "warmup": 1},
+            json={"id": "prof", "mode": "train", "warmup": 1},
         )
         assert resp.status_code == 200
         assert len(resp.json()["nodes"]) > 0
 
-    def test_profile_no_model(self):
-        from server.api.routes import worker
-
-        original = worker.model
-        worker.model = None
-        try:
-            resp = client.post("/api/bench/profile", json={})
-            assert resp.status_code == 400
-            assert "no model" in resp.json()["detail"]
-        finally:
-            worker.model = original
+    def test_profile_uncompiled_model(self):
+        resp = client.post("/api/bench/profile", json={"id": "ghost"})
+        assert resp.status_code == 400
+        assert "not compiled" in resp.json()["detail"]
 
     def test_profile_defaults(self):
-        _compile(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
-        resp = client.post("/api/bench/profile")
+        _compile(model_id="prof", n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        resp = client.post("/api/bench/profile", json={"id": "prof"})
         assert resp.status_code == 200
         assert len(resp.json()["nodes"]) > 0

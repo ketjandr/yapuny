@@ -44,6 +44,11 @@ class GraphRequest(BaseSchema):
     meta: GraphMetaSchema = Field(default_factory=GraphMetaSchema)
 
 
+class ModelGraphRequest(BaseSchema):
+    id: str
+    graph: GraphRequest
+
+
 # -- Data --
 
 
@@ -56,12 +61,12 @@ class PrepareDataRequest(BaseSchema):
 
 
 class TrainRequest(BaseSchema):
+    id: str
     max_steps: int = 2000
     batch_size: int = 32
     learning_rate: float = 3e-4
     eval_interval: int = 200
     eval_iters: int = 50
-    checkpoint_path: str | None = None
     bench: bool = False
 
 
@@ -69,6 +74,7 @@ class TrainRequest(BaseSchema):
 
 
 class GenerateRequest(BaseSchema):
+    id: str
     prompt: str
     max_new_tokens: int = 50
     temperature: float = 1.0
@@ -77,6 +83,7 @@ class GenerateRequest(BaseSchema):
 
 
 class DecodeRequest(BaseSchema):
+    id: str
     token_ids: list[int]
 
 
@@ -84,6 +91,7 @@ class DecodeRequest(BaseSchema):
 
 
 class ProfileRequest(BaseSchema):
+    id: str
     mode: str = "decode"
     prompt_tokens: int = 64
     new_tokens: int = 128
@@ -91,7 +99,7 @@ class ProfileRequest(BaseSchema):
 
 
 class BenchRunRequest(BaseSchema):
-    graphs: list[GraphRequest] = Field(min_length=1, max_length=5)
+    graphs: list[ModelGraphRequest] = Field(min_length=1, max_length=5)
     prompt: str
     max_new_tokens: int = 50
     temperature: float = 1.0

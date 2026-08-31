@@ -4,9 +4,10 @@ import torch
 from server.compiler.compiler import GraphCompiler
 from server.compiler.fusion_registry import FUSION_AVAILABLE
 from server.compiler.quantization_registry import QUANTIZATION_AVAILABLE
-from server.compiler.utils import graph_structure_hash
+from server.compiler.utils import graph_full_hash, graph_structure_hash
 from server.models.graph import GraphSpec
 from tests.server.graph_factory import default_gpt_graph
+from worker.worker import CacheEntry
 
 requires_cuda = pytest.mark.skipif(
     not torch.cuda.is_available(),
@@ -309,14 +310,16 @@ class TestQuantizationCompiler:
         q_model.eval()
 
         w = Worker.__new__(Worker)
-        w.model = q_model
-        w.graph = q_graph
         w.device = torch.device("cpu")
         w.training = False
+        w.training_id = None
         w.train_state = None
-        w._weight_store = {}
-        w._structure_hash = None
+        w.cache = {
+            "q": CacheEntry(
+                graph_full_hash(q_graph), graph_structure_hash(q_graph), q_graph, q_model, None
+            )
+        }
 
-        result = w.train(max_steps=10)
+        result = w.train("q", max_steps=10)
         assert "error" in result
         assert "quantized" in result["error"]

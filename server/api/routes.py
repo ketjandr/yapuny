@@ -12,6 +12,7 @@ from server.api.schemas import (
     DecodeRequest,
     GenerateRequest,
     GraphRequest,
+    ModelGraphRequest,
     PrepareDataRequest,
     ProfileRequest,
     TrainRequest,
@@ -40,12 +41,33 @@ def validate_graph(request: GraphRequest):
 
 
 @router.post("/graph/compile", tags=["graph"])
-def compile_graph(request: GraphRequest):
+def compile_graph(request: ModelGraphRequest):
     try:
-        result = worker.compile_graph(request.model_dump())
+        result = worker.compile_model(request.id, request.graph.model_dump())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    return result
+
+
+# -- Model (status / list / delete) --
+
+
+@router.post("/model/status", tags=["model"])
+def model_status(request: ModelGraphRequest):
+    return worker.model_status(request.id, request.graph.model_dump())
+
+
+@router.get("/models", tags=["model"])
+def list_models():
+    return {"models": worker.list_models()}
+
+
+@router.delete("/model/{model_id}", tags=["model"])
+def delete_model(model_id: str):
+    result = worker.delete_model(model_id)
+    if result["status"] == "not_found":
+        raise HTTPException(status_code=404, detail="model not found")
     return result
 
 
@@ -172,11 +194,12 @@ def prepare_data(request: PrepareDataRequest = PrepareDataRequest()):
 @router.post("/generate", tags=["generate"])
 def generate(request: GenerateRequest):
     try:
-        prompt_ids = worker.encode_prompt(request.prompt)
+        prompt_ids = worker.encode_prompt(request.id, request.prompt)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     result = worker.generate(
+        model_id=request.id,
         prompt_ids=prompt_ids,
         max_new_tokens=request.max_new_tokens,
         temperature=request.temperature,
@@ -193,12 +216,13 @@ def generate(request: GenerateRequest):
 @router.post("/generate/stream", tags=["generate"])
 def generate_stream(request: GenerateRequest):
     try:
-        prompt_ids = worker.encode_prompt(request.prompt)
+        prompt_ids = worker.encode_prompt(request.id, request.prompt)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     def event_stream():
         for event in worker.generate_stream(
+            model_id=request.id,
             prompt_ids=prompt_ids,
             max_new_tokens=request.max_new_tokens,
             temperature=request.temperature,
@@ -212,7 +236,7 @@ def generate_stream(request: GenerateRequest):
 
 @router.post("/decode", tags=["generate"])
 def decode_tokens(request: DecodeRequest):
-    result = worker.decode_tokens(request.token_ids)
+    result = worker.decode_tokens(request.id, request.token_ids)
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -224,19 +248,19 @@ def decode_tokens(request: DecodeRequest):
 
 
 def _start_train(request: TrainRequest, background_tasks: BackgroundTasks):
-    if worker.model is None:
-        raise HTTPException(status_code=400, detail="no model compiled")
+    if request.id not in worker.cache:
+        raise HTTPException(status_code=400, detail="model not compiled - compile first")
     if worker.training:
         raise HTTPException(status_code=409, detail="training already in progress")
 
     background_tasks.add_task(
         worker.train,
+        request.id,
         max_steps=request.max_steps,
         batch_size=request.batch_size,
         learning_rate=request.learning_rate,
         eval_interval=request.eval_interval,
         eval_iters=request.eval_iters,
-        checkpoint_path=request.checkpoint_path,
         bench=request.bench,
     )
 
@@ -289,25 +313,21 @@ def stop_training():
 
 
 @router.post("/bench/profile", tags=["benchmark"])
-def bench_profile(request: ProfileRequest = ProfileRequest()):
+def bench_profile(request: ProfileRequest):
     from dataclasses import asdict
-
-    from worker.bench import profile_graph
-
-    if worker.model is None:
-        raise HTTPException(status_code=400, detail="no model compiled")
 
     if request.mode not in ("decode", "train"):
         raise HTTPException(status_code=400, detail="mode must be 'decode' or 'train'")
 
-    result = profile_graph(
-        model=worker.model,
-        device=worker.device,
+    result = worker.profile(
+        model_id=request.id,
         mode=request.mode,
         prompt_tokens=request.prompt_tokens,
         new_tokens=request.new_tokens,
         warmup=request.warmup,
     )
+    if result is None:
+        raise HTTPException(status_code=400, detail="model not compiled - compile first")
 
     return {
         "nodes": [asdict(n) for n in result.nodes],
@@ -316,36 +336,35 @@ def bench_profile(request: ProfileRequest = ProfileRequest()):
     }
 
 
-def _bench_stream(request: BenchRunRequest, prompt_ids: list[int]):
+def _bench_stream(request: BenchRunRequest):
+    from data.tokenizer import encode
     from server.compiler.compiler import GraphCompiler
     from server.compiler.utils import graph_structure_hash
     from server.models.graph import GraphSpec
+    from worker import store
     from worker.bench import _collect_env
 
-    original_model = worker.model
+    # bench sits on top of trained models: each entry loads its own package from the
+    # locker (its own tokenizer + weights), so different vocabs coexist across graphs.
     compiler = GraphCompiler()
     device = worker.device
-    weight_cache: dict[str, dict] = {}
 
     try:
-        for i, graph_req in enumerate(request.graphs):
-            graph = GraphSpec.from_dict(graph_req.model_dump())
-            graph_idx = i
+        for i, entry in enumerate(request.graphs):
+            graph = GraphSpec.from_dict(entry.graph.model_dump())
             s_hash = graph_structure_hash(graph)
 
-            if s_hash not in weight_cache:
-                pretrained = worker._weight_store.get(s_hash)
-                if pretrained:
-                    weight_cache[s_hash] = pretrained
+            pkg = store.load(entry.id)
+            if pkg is None or pkg.structure_hash != s_hash:
+                err = {"graph_idx": i, "error": "model not trained"}
+                yield f"event: error\ndata: {json.dumps(err)}\n\n"
+                continue
 
-            pretrained = weight_cache.get(s_hash)
-            if pretrained:
-                model = compiler.compile(graph, pretrained_state=pretrained)
-            else:
-                model = compiler.compile(graph)
-
+            model = compiler.compile(graph, pretrained_state=pkg.weights)
             model.to(device)
             model.eval()
+
+            prompt_ids = encode(pkg.tokenizer, request.prompt)
 
             warmup_idx = torch.tensor([prompt_ids], device=device)
             block_size = model.meta["block_size"]
@@ -354,17 +373,18 @@ def _bench_stream(request: BenchRunRequest, prompt_ids: list[int]):
             if device.type == "cuda":
                 torch.cuda.synchronize(device)
 
-            yield f"event: graph_start\ndata: {json.dumps({'graph_idx': graph_idx})}\n\n"
+            yield f"event: graph_start\ndata: {json.dumps({'graph_idx': i})}\n\n"
 
-            worker.model = model
-            for event in worker.generate_stream(
-                prompt_ids=prompt_ids,
+            for event in worker._stream_tokens(
+                model,
+                pkg.tokenizer,
+                prompt_ids,
                 max_new_tokens=request.max_new_tokens,
                 temperature=request.temperature,
                 top_k=request.top_k,
                 bench=True,
             ):
-                event["data"]["graph_idx"] = graph_idx
+                event["data"]["graph_idx"] = i
                 yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
 
         yield f"event: done\ndata: {json.dumps({'env': _collect_env(device)})}\n\n"
@@ -372,17 +392,7 @@ def _bench_stream(request: BenchRunRequest, prompt_ids: list[int]):
     except Exception as e:
         yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
-    finally:
-        worker.model = original_model
-
 
 @router.post("/bench/generate", tags=["benchmark"])
 def bench_generate(request: BenchRunRequest):
-    try:
-        prompt_ids = worker.encode_prompt(request.prompt)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    return StreamingResponse(
-        _bench_stream(request, prompt_ids), media_type="text/event-stream"
-    )
+    return StreamingResponse(_bench_stream(request), media_type="text/event-stream")

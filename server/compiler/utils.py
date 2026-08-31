@@ -56,8 +56,19 @@ def topo_sort(graph: GraphSpec) -> list[str]:
 
 
 def graph_structure_hash(graph: GraphSpec) -> str:
+    # excludes inference-based transforms like fusion and quantization
     nodes = sorted([(n.id, n.type, sorted(n.config.items())) for n in graph.nodes])
     edges = sorted([(e.from_node, e.from_port, e.to_node, e.to_port) for e in graph.edges])
     meta = sorted(asdict(graph.meta).items())
     blob = json.dumps([nodes, edges, meta], default=str).encode()
+    return hashlib.sha256(blob).hexdigest()
+
+
+def graph_full_hash(graph: GraphSpec) -> str:
+    # includes all train and inference-based transforms
+    nodes = sorted([(n.id, n.type, n.quantized, sorted(n.config.items())) for n in graph.nodes])
+    edges = sorted([(e.from_node, e.from_port, e.to_node, e.to_port) for e in graph.edges])
+    meta = sorted(asdict(graph.meta).items())
+    fusion = sorted(sorted(fg.nodes) for fg in graph.fusion_groups)
+    blob = json.dumps([nodes, edges, meta, fusion], default=str).encode()
     return hashlib.sha256(blob).hexdigest()
