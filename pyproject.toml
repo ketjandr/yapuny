@@ -3,7 +3,7 @@ name = "yapuny"
 version = "0.1.0"
 requires-python = ">=3.9"
 dependencies = [
-    "torch",
+    "torch>=2.8",
     "numpy",
     "tokenizers",
     "fastapi",
