@@ -507,3 +507,10 @@ class Worker:
         tok = load_tokenizer(TOKENIZER_PATH)
         text = decode(tok, token_ids)
         return {"text": text}
+
+    def encode_prompt(self, text: str) -> list[int]:
+        if not TOKENIZER_PATH.exists():
+            raise ValueError("no tokenizer found - prepare data first")
+
+        tok = load_tokenizer(TOKENIZER_PATH)
+        return encode(tok, text)

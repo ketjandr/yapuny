@@ -171,8 +171,13 @@ def prepare_data(request: PrepareDataRequest = PrepareDataRequest()):
 
 @router.post("/generate", tags=["generate"])
 def generate(request: GenerateRequest):
+    try:
+        prompt_ids = worker.encode_prompt(request.prompt)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     result = worker.generate(
-        prompt_ids=request.prompt_ids,
+        prompt_ids=prompt_ids,
         max_new_tokens=request.max_new_tokens,
         temperature=request.temperature,
         top_k=request.top_k,
@@ -187,9 +192,14 @@ def generate(request: GenerateRequest):
 
 @router.post("/generate/stream", tags=["generate"])
 def generate_stream(request: GenerateRequest):
+    try:
+        prompt_ids = worker.encode_prompt(request.prompt)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     def event_stream():
         for event in worker.generate_stream(
-            prompt_ids=request.prompt_ids,
+            prompt_ids=prompt_ids,
             max_new_tokens=request.max_new_tokens,
             temperature=request.temperature,
             top_k=request.top_k,
@@ -306,7 +316,7 @@ def bench_profile(request: ProfileRequest = ProfileRequest()):
     }
 
 
-def _bench_stream(request: BenchRunRequest):
+def _bench_stream(request: BenchRunRequest, prompt_ids: list[int]):
     from server.compiler.compiler import GraphCompiler
     from server.compiler.utils import graph_structure_hash
     from server.models.graph import GraphSpec
@@ -337,7 +347,7 @@ def _bench_stream(request: BenchRunRequest):
             model.to(device)
             model.eval()
 
-            warmup_idx = torch.tensor([request.prompt_ids], device=device)
+            warmup_idx = torch.tensor([prompt_ids], device=device)
             block_size = model.meta["block_size"]
             with torch.no_grad():
                 model(warmup_idx[:, -block_size:])
@@ -348,7 +358,7 @@ def _bench_stream(request: BenchRunRequest):
 
             worker.model = model
             for event in worker.generate_stream(
-                prompt_ids=request.prompt_ids,
+                prompt_ids=prompt_ids,
                 max_new_tokens=request.max_new_tokens,
                 temperature=request.temperature,
                 top_k=request.top_k,
@@ -368,4 +378,11 @@ def _bench_stream(request: BenchRunRequest):
 
 @router.post("/bench/generate", tags=["benchmark"])
 def bench_generate(request: BenchRunRequest):
-    return StreamingResponse(_bench_stream(request), media_type="text/event-stream")
+    try:
+        prompt_ids = worker.encode_prompt(request.prompt)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return StreamingResponse(
+        _bench_stream(request, prompt_ids), media_type="text/event-stream"
+    )

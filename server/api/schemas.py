@@ -69,7 +69,7 @@ class TrainRequest(BaseSchema):
 
 
 class GenerateRequest(BaseSchema):
-    prompt_ids: list[int]
+    prompt: str
     max_new_tokens: int = 50
     temperature: float = 1.0
     top_k: int | None = None
@@ -92,7 +92,7 @@ class ProfileRequest(BaseSchema):
 
 class BenchRunRequest(BaseSchema):
     graphs: list[GraphRequest] = Field(min_length=1, max_length=5)
-    prompt_ids: list[int]
+    prompt: str
     max_new_tokens: int = 50
     temperature: float = 1.0
     top_k: int | None = None

@@ -111,22 +111,22 @@ class TestGraphRequest:
 
 class TestGenerateRequest:
     def test_valid(self):
-        r = GenerateRequest(prompt_ids=[1, 2, 3])
+        r = GenerateRequest(prompt="hello world")
         assert r.max_new_tokens == 50
         assert r.temperature == 1.0
         assert r.bench is False
 
     def test_bench_flag(self):
-        r = GenerateRequest(prompt_ids=[1, 2, 3], bench=True)
+        r = GenerateRequest(prompt="hello", bench=True)
         assert r.bench is True
 
-    def test_missing_prompt_ids(self):
+    def test_missing_prompt(self):
         with pytest.raises(ValidationError):
             GenerateRequest()
 
     def test_extra_field_rejected(self):
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            GenerateRequest(prompt_ids=[1], beam_width=5)
+            GenerateRequest(prompt="hi", beam_width=5)
 
 
 class TestDecodeRequest:
@@ -212,26 +212,26 @@ class TestBenchRunRequest:
         ))
 
     def test_defaults(self):
-        r = BenchRunRequest(graphs=[self._dummy_graph()], prompt_ids=[1, 2, 3])
+        r = BenchRunRequest(graphs=[self._dummy_graph()], prompt="hello")
         assert r.max_new_tokens == 50
         assert r.temperature == 1.0
         assert r.top_k is None
 
     def test_too_many_graphs_rejected(self):
         with pytest.raises(ValidationError):
-            BenchRunRequest(graphs=[self._dummy_graph() for _ in range(6)], prompt_ids=[1])
+            BenchRunRequest(graphs=[self._dummy_graph() for _ in range(6)], prompt="hi")
 
     def test_empty_graphs_rejected(self):
         with pytest.raises(ValidationError):
-            BenchRunRequest(graphs=[], prompt_ids=[1])
+            BenchRunRequest(graphs=[], prompt="hi")
 
-    def test_missing_prompt_ids(self):
+    def test_missing_prompt(self):
         with pytest.raises(ValidationError):
             BenchRunRequest(graphs=[self._dummy_graph()])
 
     def test_extra_field_rejected(self):
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            BenchRunRequest(graphs=[self._dummy_graph()], prompt_ids=[1], gpu="A100")
+            BenchRunRequest(graphs=[self._dummy_graph()], prompt="hi", gpu="A100")
 
 
 # -- benchmark route tests --
@@ -261,13 +261,14 @@ def _parse_sse(text: str) -> list[dict]:
 
 class TestBenchRoutes:
     def test_streams_single_graph(self):
-        graph_a = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        # vocab_size matches the committed tokenizer so encoded prompt ids are in range
+        graph_a = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=8000)
 
         resp = client.post(
             "/api/bench/generate",
             json={
                 "graphs": [graph_a],
-                "prompt_ids": [1, 2, 3],
+                "prompt": "abc",
                 "max_new_tokens": 4,
             },
         )
@@ -288,14 +289,14 @@ class TestBenchRoutes:
         assert "env" in dones[-1]["data"]
 
     def test_multiple_graphs(self):
-        graph_v1 = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=64)
-        graph_v2 = default_gpt_graph(n_layer=2, n_head=2, n_embd=32, block_size=16, vocab_size=64)
+        graph_v1 = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=8000)
+        graph_v2 = default_gpt_graph(n_layer=2, n_head=2, n_embd=32, block_size=16, vocab_size=8000)
 
         resp = client.post(
             "/api/bench/generate",
             json={
                 "graphs": [graph_v1, graph_v2],
-                "prompt_ids": [1, 2, 3],
+                "prompt": "abc",
                 "max_new_tokens": 4,
             },
         )
