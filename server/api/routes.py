@@ -366,10 +366,9 @@ def _bench_stream(request: BenchRunRequest):
 
             prompt_ids = encode(pkg.tokenizer, request.prompt)
 
-            warmup_idx = torch.tensor([prompt_ids], device=device)
-            block_size = model.meta["block_size"]
-            with torch.no_grad():
-                model(warmup_idx[:, -block_size:])
+            # warmup both prefill and decode kernels so Triton JIT doesn't corrupt timings
+            for _ in worker._stream_tokens(model, pkg.tokenizer, prompt_ids, max_new_tokens=3):
+                pass
             if device.type == "cuda":
                 torch.cuda.synchronize(device)
 
