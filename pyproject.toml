@@ -21,7 +21,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["model", "nodes", "shared", "kernels", "kernels.fusion", "kernels.quantization", "data", "tests", "tests.fusion", "tests.quantization", "server", "server.compiler", "server.api", "server.models", "worker"]
+packages = ["nodes", "shared", "kernels", "kernels.fusion", "kernels.quantization", "data", "tests", "tests.fusion", "tests.quantization", "server", "server.compiler", "server.api", "server.models", "worker"]
 
 [tool.ruff]
 line-length = 100
