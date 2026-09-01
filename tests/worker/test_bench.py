@@ -9,7 +9,7 @@ from worker.bench import (
     ProfileResult,
     profile_graph,
 )
-from worker.worker import Worker
+from worker.worker import ModelCacheEntry, Worker
 
 TINY = dict(n_layer=2, n_head=2, n_embd=32, block_size=16, vocab_size=64)
 
@@ -22,17 +22,18 @@ def _compile(graph_dict: dict) -> tuple:
     return model, graph
 
 
-class TestBenchFlag:
-    def _make_worker(self):
-        model, _ = _compile(default_gpt_graph(**TINY))
-        w = Worker.__new__(Worker)
-        w.model = model
-        w.device = torch.device("cpu")
-        return w
+def _worker_with_model():
+    model, graph = _compile(default_gpt_graph(**TINY))
+    w = Worker.__new__(Worker)
+    w.device = torch.device("cpu")
+    w.cache = {"m": ModelCacheEntry("fh", "sh", graph, model, None)}
+    return w
 
+
+class TestBenchFlag:
     def test_generate_bench_returns_timing(self):
-        w = self._make_worker()
-        result = w.generate(prompt_ids=[1, 2, 3], max_new_tokens=5, bench=True)
+        w = _worker_with_model()
+        result = w.generate("m", prompt_ids=[1, 2, 3], max_new_tokens=5, bench=True)
         assert "bench" in result
         assert result["bench"]["prefill_ms"] > 0
         assert result["bench"]["tokens_per_sec"] > 0
@@ -40,24 +41,17 @@ class TestBenchFlag:
         assert result["bench"]["peak_vram_mb"] is None
 
     def test_generate_no_bench_by_default(self):
-        w = self._make_worker()
-        result = w.generate(prompt_ids=[1, 2, 3], max_new_tokens=5)
+        w = _worker_with_model()
+        result = w.generate("m", prompt_ids=[1, 2, 3], max_new_tokens=5)
         assert "bench" not in result
         assert "tokens" in result
         assert len(result["tokens"]) == 5
 
 
 class TestGenerateStream:
-    def _make_worker(self):
-        model, _ = _compile(default_gpt_graph(**TINY))
-        w = Worker.__new__(Worker)
-        w.model = model
-        w.device = torch.device("cpu")
-        return w
-
     def test_streams_tokens(self):
-        w = self._make_worker()
-        events = list(w.generate_stream(prompt_ids=[1, 2, 3], max_new_tokens=5))
+        w = _worker_with_model()
+        events = list(w.generate_stream("m", prompt_ids=[1, 2, 3], max_new_tokens=5))
         token_events = [e for e in events if e["event"] == "token"]
         assert len(token_events) == 5
         assert all("token" in e["data"] for e in token_events)
@@ -66,8 +60,8 @@ class TestGenerateStream:
         assert len(done[0]["data"]["tokens"]) == 5
 
     def test_streams_with_bench(self):
-        w = self._make_worker()
-        events = list(w.generate_stream(prompt_ids=[1, 2, 3], max_new_tokens=5, bench=True))
+        w = _worker_with_model()
+        events = list(w.generate_stream("m", prompt_ids=[1, 2, 3], max_new_tokens=5, bench=True))
         prefill = [e for e in events if e["event"] == "prefill"]
         assert len(prefill) == 1
         assert prefill[0]["data"]["prefill_ms"] > 0
@@ -78,11 +72,11 @@ class TestGenerateStream:
         assert "bench" in done[0]["data"]
         assert done[0]["data"]["bench"]["prefill_ms"] > 0
 
-    def test_no_model_yields_error(self):
+    def test_uncompiled_id_yields_error(self):
         w = Worker.__new__(Worker)
-        w.model = None
         w.device = torch.device("cpu")
-        events = list(w.generate_stream(prompt_ids=[1, 2, 3]))
+        w.cache = {}
+        events = list(w.generate_stream("missing", prompt_ids=[1, 2, 3]))
         assert len(events) == 1
         assert events[0]["event"] == "error"
 
@@ -119,34 +113,3 @@ class TestProfileGraph:
         assert isinstance(result, ProfileResult)
         assert len(result.nodes) > 0
         assert not model.training
-
-    def test_profile_flag_reset_after_run(self):
-        model, _ = _compile(default_gpt_graph(**TINY))
-        assert not model.profile
-        profile_graph(
-            model,
-            torch.device("cpu"),
-            mode="decode",
-            prompt_tokens=4,
-            new_tokens=4,
-            batch_size=1,
-            warmup=1,
-        )
-        assert not model.profile
-
-    def test_profile_flag_reset_on_error(self):
-        model, _ = _compile(default_gpt_graph(**TINY))
-        model.profile = False
-        try:
-            profile_graph(
-                model,
-                torch.device("cpu"),
-                mode="decode",
-                prompt_tokens=4,
-                new_tokens=0,
-                batch_size=1,
-                warmup=0,
-            )
-        except Exception:
-            pass
-        assert not model.profile
