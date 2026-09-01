@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from tokenizers import Tokenizer
 
 from data.tokenizer import (
     decode,
@@ -15,7 +16,7 @@ from data.tokenizer import (
     save_tokenizer,
     train_tokenizer,
 )
-from server.compiler.compiler import GraphCompiler, cache_length
+from server.compiler.compiler import GraphCompiler, GraphModule, cache_length
 from server.compiler.utils import (
     graph_full_hash,
     graph_structure_hash,
@@ -39,8 +40,8 @@ class ModelCacheEntry:
     full_hash: str
     structure_hash: str
     graph: GraphSpec
-    model: object
-    tokenizer: object | None
+    model: GraphModule
+    tokenizer: Tokenizer | None
 
 
 class Worker:

@@ -155,10 +155,48 @@ def flash_attention(
     return out
 
 
+def _reference_attention(
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, is_causal: bool
+) -> torch.Tensor:
+    """Plain-torch attention matching the flash kernel's math (scale, causal mask, softmax).
+    Used only for the backward pass - autograd differentiates this to produce the gradients.
+    TODO: remove this once we create the backward kernel in Triton."""
+    scale = q.shape[-1] ** -0.5
+    scores = torch.matmul(q, k.transpose(-2, -1)) * scale
+    if is_causal:
+        t_q, t_k = scores.shape[-2], scores.shape[-1]
+        causal = torch.tril(torch.ones(t_q, t_k, device=scores.device, dtype=torch.bool))
+        scores = scores.masked_fill(~causal, float("-inf"))
+    attn = torch.softmax(scores, dim=-1)
+    return torch.matmul(attn, v)
+
+
+class _FlashAttentionFn(torch.autograd.Function):
+    """TODO: a native Triton flash backward would make training memory-efficient too."""
+
+    @staticmethod
+    def forward(ctx, q, k, v, is_causal):
+        out = flash_attention(q, k, v, is_causal)
+        ctx.save_for_backward(q, k, v)
+        ctx.is_causal = is_causal
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        q, k, v = ctx.saved_tensors
+        qd = q.detach().requires_grad_(True)
+        kd = k.detach().requires_grad_(True)
+        vd = v.detach().requires_grad_(True)
+        with torch.enable_grad():
+            out = _reference_attention(qd, kd, vd, ctx.is_causal)
+        dq, dk, dv = torch.autograd.grad(out, (qd, kd, vd), grad_out)
+        return dq, dk, dv, None
+
+
 class FlashAttention(nn.Module):
     def __init__(self, is_causal: bool = True):
         super().__init__()
         self.is_causal = is_causal
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        return flash_attention(q, k, v, self.is_causal)
+        return _FlashAttentionFn.apply(q, k, v, self.is_causal)

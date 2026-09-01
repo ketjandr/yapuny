@@ -83,6 +83,31 @@ class TestCorrectness:
         torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
 
+class TestGradients:
+    def test_backward_runs(self, setup):
+        q, k, v = (t.clone().requires_grad_(True) for t in setup)
+        out = FlashAttention(is_causal=True)(q, k, v)
+        out.sum().backward()
+        for g in (q.grad, k.grad, v.grad):
+            assert g is not None
+            assert torch.isfinite(g).all()
+
+    def test_grads_match_reference(self, setup):
+        # flash node backward (plain-torch recompute) must match a naive attention's grads
+        torch.manual_seed(0)
+        w = torch.randn(B, H, T, D, device=DEVICE)  # shared upstream gradient
+
+        qf, kf, vf = (t.clone().requires_grad_(True) for t in setup)
+        (FlashAttention(is_causal=True)(qf, kf, vf) * w).sum().backward()
+
+        qr, kr, vr = (t.clone().requires_grad_(True) for t in setup)
+        (naive_attention(qr, kr, vr, is_causal=True) * w).sum().backward()
+
+        torch.testing.assert_close(qf.grad, qr.grad, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(kf.grad, kr.grad, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(vf.grad, vr.grad, atol=1e-2, rtol=1e-2)
+
+
 class TestBenchmark:
     @pytest.mark.parametrize("seq_len", [64, 128, 256])
     def test_flash(self, seq_len, benchmark):
