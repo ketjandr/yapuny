@@ -1,11 +1,13 @@
 // NodePalette: drag any node type onto the canvas, grouped by category.
 import type { CSSProperties } from "react";
+import { DEFAULT_META } from "@/lib/defaultGraph";
 import {
   CATALOG_ORDER,
   CATEGORY,
   CATEGORY_OF,
   NODE_CATALOG,
   type NodeCategory,
+  resolveSubtitle,
 } from "@/lib/nodeCatalog";
 
 export const PALETTE_MIME = "application/yapuny-node";
@@ -40,7 +42,7 @@ export function NodePalette() {
                     className="pchip"
                     draggable
                     onDragStart={(e) => onDragStart(e, t)}
-                    title={def.subtitle}
+                    title={resolveSubtitle(def, DEFAULT_META)}
                   >
                     <span className="m" style={{ color: "var(--accent)" }}>
                       ▪

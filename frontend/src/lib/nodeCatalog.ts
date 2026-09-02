@@ -73,7 +73,7 @@ export interface PortDef {
 export interface NodeDef {
   type: string; // backend node type key
   label: string; // uppercase display name
-  subtitle: string; // mono caption under the name
+  subtitle: string | ((meta: GraphMetaSchema) => string); // mono formula under the name
   variant: NodeVariant;
   inputs: PortDef[];
   outputs: PortDef[];
@@ -84,12 +84,19 @@ export interface NodeDef {
 
 const p = (id: string, shape: Axis[], label = id): PortDef => ({ id, label, shape });
 
+const headDim = (m: GraphMetaSchema) => Math.floor(m.n_embd / m.n_head);
+
+// resolves a node's subtitle (static string, or derived from meta)
+export function resolveSubtitle(def: NodeDef, meta: GraphMetaSchema): string {
+  return typeof def.subtitle === "function" ? def.subtitle(meta) : def.subtitle;
+}
+
 // Ordered roughly by the forward pass so the palette reads top-to-bottom like a GPT.
 export const NODE_CATALOG: Record<string, NodeDef> = {
   token_embedding: {
     type: "token_embedding",
     label: "Token Embedding",
-    subtitle: "vocab × embd",
+    subtitle: "emb = W_tok[idx]",
     variant: "req",
     inputs: [p("idx", ["T"])],
     outputs: [p("out", ["T", "C"], "emb")],
@@ -99,7 +106,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   position_embedding: {
     type: "position_embedding",
     label: "Position Embedding",
-    subtitle: "block × embd",
+    subtitle: "emb = W_pos[pos]",
     variant: "req",
     inputs: [p("positions", ["T"], "pos")],
     outputs: [p("out", ["T", "C"], "emb")],
@@ -109,7 +116,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   layernorm: {
     type: "layernorm",
     label: "LayerNorm",
-    subtitle: "γ, β",
+    subtitle: "out = γ·norm(x) + β",
     variant: "req",
     inputs: [p("x", ["T", "C"])],
     outputs: [p("out", ["T", "C"])],
@@ -119,7 +126,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   qkv_proj: {
     type: "qkv_proj",
     label: "QKV Projection",
-    subtitle: "linear → q k v",
+    subtitle: "q,k,v = x·W_qkv",
     variant: "req",
     inputs: [p("x", ["T", "C"])],
     outputs: [p("q", ["H", "T", "hd"]), p("k", ["H", "T", "hd"]), p("v", ["H", "T", "hd"])],
@@ -129,7 +136,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   kv_cache: {
     type: "kv_cache",
     label: "KV Cache",
-    subtitle: "decode reuse",
+    subtitle: "k,v = cat(cache, k,v)",
     variant: "req",
     inputs: [p("k", ["H", "T", "hd"]), p("v", ["H", "T", "hd"])],
     outputs: [p("k", ["H", "S", "hd"]), p("v", ["H", "S", "hd"])],
@@ -140,7 +147,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   attention_score: {
     type: "attention_score",
     label: "Attention Score",
-    subtitle: "QKᵀ / √d",
+    subtitle: (m) => `att = q·kᵀ / √${headDim(m)}`,
     variant: "req",
     inputs: [p("q", ["H", "T", "hd"]), p("k", ["H", "S", "hd"])],
     outputs: [p("out", ["H", "T", "S"], "att")],
@@ -150,7 +157,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   causal_mask: {
     type: "causal_mask",
     label: "Causal Mask",
-    subtitle: "tril −∞",
+    subtitle: "att[j>i] = −∞",
     variant: "req",
     inputs: [p("x", ["H", "T", "S"], "att")],
     outputs: [p("out", ["H", "T", "S"], "att")],
@@ -160,7 +167,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   softmax: {
     type: "softmax",
     label: "Softmax",
-    subtitle: "row-wise",
+    subtitle: "att = softmax(att)",
     variant: "req",
     inputs: [p("x", ["H", "T", "S"], "att")],
     outputs: [p("out", ["H", "T", "S"], "att")],
@@ -170,7 +177,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   value_weighted_sum: {
     type: "value_weighted_sum",
     label: "Value Sum",
-    subtitle: "att · V",
+    subtitle: "out = att·v",
     variant: "req",
     inputs: [p("att", ["H", "T", "S"]), p("v", ["H", "S", "hd"])],
     outputs: [p("out", ["H", "T", "hd"])],
@@ -180,7 +187,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   out_proj: {
     type: "out_proj",
     label: "Out Projection",
-    subtitle: "merge heads · linear",
+    subtitle: "out = merge(x)·W_o",
     variant: "req",
     inputs: [p("x", ["H", "T", "hd"])],
     outputs: [p("out", ["T", "C"])],
@@ -190,7 +197,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   flash_attention: {
     type: "flash_attention",
     label: "Flash Attention",
-    subtitle: "QKᵀ · softmax · V",
+    subtitle: (m) => `out = softmax(q·kᵀ/√${headDim(m)})·v`,
     variant: "req",
     inputs: [p("q", ["H", "T", "hd"]), p("k", ["H", "S", "hd"]), p("v", ["H", "S", "hd"])],
     outputs: [p("out", ["H", "T", "hd"])],
@@ -200,7 +207,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   residual_add: {
     type: "residual_add",
     label: "Residual Add",
-    subtitle: "skip + add",
+    subtitle: "out = x + resid",
     variant: "req",
     inputs: [p("x", ["T", "C"]), p("residual", ["T", "C"], "resid")],
     outputs: [p("out", ["T", "C"])],
@@ -210,7 +217,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   dropout: {
     type: "dropout",
     label: "Dropout",
-    subtitle: "p_drop",
+    subtitle: "out = drop(x, p)",
     variant: "req",
     inputs: [p("x", ["T", "C"])],
     outputs: [p("out", ["T", "C"])],
@@ -220,7 +227,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   mlp_up: {
     type: "mlp_up",
     label: "MLP Up",
-    subtitle: "embd → 4·embd",
+    subtitle: "out = x·W_up",
     variant: "req",
     inputs: [p("x", ["T", "C"])],
     outputs: [p("out", ["T", "4C"])],
@@ -230,7 +237,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   mlp_activation: {
     type: "mlp_activation",
     label: "GELU",
-    subtitle: "activation",
+    subtitle: "out = gelu(x)",
     variant: "req",
     inputs: [p("x", ["T", "4C"])],
     outputs: [p("out", ["T", "4C"])],
@@ -240,7 +247,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   mlp_down: {
     type: "mlp_down",
     label: "MLP Down",
-    subtitle: "4·embd → embd",
+    subtitle: "out = x·W_down",
     variant: "req",
     inputs: [p("x", ["T", "4C"])],
     outputs: [p("out", ["T", "C"])],
@@ -250,7 +257,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   lm_head: {
     type: "lm_head",
     label: "LM Head",
-    subtitle: "linear → vocab",
+    subtitle: "logits = x·W_vocab",
     variant: "req",
     inputs: [p("x", ["T", "C"])],
     outputs: [p("out", ["T", "V"], "logits")],
@@ -300,6 +307,7 @@ export const PORT_ROW_H = 30; // vertical space per port row
 const NODE_MIN_W = 120;
 const SHAPE_CHAR_W = 4.5; // px per char of the 7px mono shape line
 const HEAD_CHAR_W = 8.4; // px per char of the 11px uppercase header (with tracking)
+const SUB_CHAR_W = 5.7; // px per char of the 8.5px mono subtitle formula (with tracking)
 
 function widestLabel(ports: PortDef[], meta: GraphMetaSchema): number {
   if (ports.length === 0) return 0;
@@ -307,11 +315,12 @@ function widestLabel(ports: PortDef[], meta: GraphMetaSchema): number {
   return Math.max(...ports.map((p) => formatShape(p.shape, meta, "train").length * SHAPE_CHAR_W));
 }
 
-// Content-driven width: fits both label stacks side by side + the header, so no overflow.
+// Content-driven width: fits both label stacks side by side, the header, and the subtitle.
 export function nodeWidth(def: NodeDef, meta: GraphMetaSchema): number {
   const labels = 44 + widestLabel(def.inputs, meta) + widestLabel(def.outputs, meta);
   const header = 26 + (def.quantizable ? 30 : 0) + def.label.length * HEAD_CHAR_W;
-  return Math.round(Math.max(NODE_MIN_W, labels, header));
+  const subtitle = 24 + resolveSubtitle(def, meta).length * SUB_CHAR_W;
+  return Math.round(Math.max(NODE_MIN_W, labels, header, subtitle));
 }
 
 export function nodeHeight(def: NodeDef): number {

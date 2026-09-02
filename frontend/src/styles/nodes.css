@@ -45,6 +45,7 @@
   font-size: 8.5px;
   color: var(--muted);
   letter-spacing: 0.02em;
+  white-space: nowrap; /* never wrap; nodeWidth is sized to fit the formula */
 }
 
 /* port labels (the dot is the RF handle): inputs inside the left edge, outputs the right */

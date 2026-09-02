@@ -10,6 +10,7 @@ import {
   nodeWidth,
   portTop,
   resolveNodeDef,
+  resolveSubtitle,
 } from "@/lib/nodeCatalog";
 import type { YNodeData } from "@/lib/graph";
 import { useCanvasStore } from "@/store/canvasStore";
@@ -54,7 +55,7 @@ export function GraphNode({ data, selected }: NodeProps) {
         <span>{def.label}</span>
         {quantized && <span className="qtag">{quantized.toUpperCase()}</span>}
       </div>
-      <div className="yn-sub">{def.subtitle}</div>
+      <div className="yn-sub">{resolveSubtitle(def, meta)}</div>
 
       {def.inputs.map((port, i) => (
         <Handle
