@@ -1,10 +1,41 @@
 // Node catalog: display + port contracts per backend node type (mirror of NODE_REGISTRY).
 import type { GraphMetaSchema } from "./types";
 
-export type NodeVariant = "req" | "opt" | "flash" | "io";
+export type NodeVariant = "req" | "io";
 
-// Symbolic tensor axis, batch dropped. T/S are dynamic; the rest resolve against meta.
-// Canonical per-type shapes - non-standard placements would need real shape inference.
+export type NodeCategory = "embedding" | "attention" | "mlp" | "norm" | "head";
+
+// category -> short badge label + full name + accent color (a token name from tokens.css)
+export const CATEGORY: Record<NodeCategory, { label: string; full: string; accent: string }> = {
+  embedding: { label: "EMBED", full: "Embedding", accent: "--steel" },
+  attention: { label: "ATTN", full: "Attention", accent: "--ice" },
+  mlp: { label: "MLP", full: "Multilayer Perceptron", accent: "--amber" },
+  norm: { label: "NORM", full: "Normalization", accent: "--green" },
+  head: { label: "HEAD", full: "Head", accent: "--violet" },
+};
+
+// which family each backend node type belongs to (drives the accent bar + badge)
+export const CATEGORY_OF: Record<string, NodeCategory> = {
+  token_embedding: "embedding",
+  position_embedding: "embedding",
+  qkv_proj: "attention",
+  kv_cache: "attention",
+  attention_score: "attention",
+  causal_mask: "attention",
+  softmax: "attention",
+  value_weighted_sum: "attention",
+  out_proj: "attention",
+  flash_attention: "attention",
+  mlp_up: "mlp",
+  mlp_activation: "mlp",
+  mlp_down: "mlp",
+  layernorm: "norm",
+  residual_add: "norm",
+  dropout: "norm",
+  lm_head: "head",
+};
+
+// Symbolic tensor axis (batch dropped): T/S are dynamic, the rest resolve against meta.
 export type Axis = "T" | "S" | "C" | "4C" | "H" | "hd" | "V";
 
 type ShapeMode = "train" | "inference";
@@ -48,8 +79,6 @@ export interface NodeDef {
   outputs: PortDef[];
   fusable: boolean; // appears in a fusion pattern -> shows the bottom fusion port
   quantizable: boolean; // has an nn.Linear the backend can quantize -> W8/W4 allowed
-  badge?: string; // small corner badge (e.g. "flash")
-  width?: number; // card width override (px); default derived below
   trainingNoop?: boolean; // does nothing during training (e.g. kv_cache) -> greyed in train mode
 }
 
@@ -59,7 +88,7 @@ const p = (id: string, shape: Axis[], label = id): PortDef => ({ id, label, shap
 export const NODE_CATALOG: Record<string, NodeDef> = {
   token_embedding: {
     type: "token_embedding",
-    label: "Token Emb",
+    label: "Token Embedding",
     subtitle: "vocab × embd",
     variant: "req",
     inputs: [p("idx", ["T"])],
@@ -69,7 +98,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   },
   position_embedding: {
     type: "position_embedding",
-    label: "Position Emb",
+    label: "Position Embedding",
     subtitle: "block × embd",
     variant: "req",
     inputs: [p("positions", ["T"], "pos")],
@@ -89,7 +118,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   },
   qkv_proj: {
     type: "qkv_proj",
-    label: "QKV Proj",
+    label: "QKV Projection",
     subtitle: "linear → q k v",
     variant: "req",
     inputs: [p("x", ["T", "C"])],
@@ -110,7 +139,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   },
   attention_score: {
     type: "attention_score",
-    label: "Attn Score",
+    label: "Attention Score",
     subtitle: "QKᵀ / √d",
     variant: "req",
     inputs: [p("q", ["H", "T", "hd"]), p("k", ["H", "S", "hd"])],
@@ -150,7 +179,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
   },
   out_proj: {
     type: "out_proj",
-    label: "Out Proj",
+    label: "Out Projection",
     subtitle: "merge heads · linear",
     variant: "req",
     inputs: [p("x", ["H", "T", "hd"])],
@@ -162,13 +191,11 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
     type: "flash_attention",
     label: "Flash Attention",
     subtitle: "QKᵀ · softmax · V",
-    variant: "flash",
+    variant: "req",
     inputs: [p("q", ["H", "T", "hd"]), p("k", ["H", "S", "hd"]), p("v", ["H", "S", "hd"])],
     outputs: [p("out", ["H", "T", "hd"])],
     fusable: false,
     quantizable: false,
-    badge: "flash",
-    width: 200,
   },
   residual_add: {
     type: "residual_add",
@@ -256,25 +283,32 @@ export function resolveNodeDef(type: string): NodeDef | undefined {
   return NODE_CATALOG[type];
 }
 
-// --- geometry: skinny cards, height grows with port count ---
-export const NODE_HEADER_H = 40; // header + subtitle band
+// --- geometry: height grows with port count, width fits the resolved labels ---
+export const NODE_HEADER_H = 50; // header + subtitle band
 export const PORT_ROW_H = 30; // vertical space per port row
-const NODE_MIN_H = 96;
-const NODE_W = 132; // skinny fixed width
+const NODE_MIN_W = 120;
+const SHAPE_CHAR_W = 4.5; // px per char of the 7px mono shape line
+const HEAD_CHAR_W = 8.4; // px per char of the 11px uppercase header (with tracking)
 
-export function nodeWidth(def: NodeDef): number {
-  return def.width ?? NODE_W;
+function widestLabel(ports: PortDef[], meta: GraphMetaSchema): number {
+  if (ports.length === 0) return 0;
+  // size against train mode - it resolves T/S to numbers, the widest the labels ever get
+  return Math.max(...ports.map((p) => formatShape(p.shape, meta, "train").length * SHAPE_CHAR_W));
+}
+
+// Content-driven width: fits both label stacks side by side + the header, so no overflow.
+export function nodeWidth(def: NodeDef, meta: GraphMetaSchema): number {
+  const labels = 44 + widestLabel(def.inputs, meta) + widestLabel(def.outputs, meta);
+  const header = 26 + (def.quantizable ? 30 : 0) + def.label.length * HEAD_CHAR_W;
+  return Math.round(Math.max(NODE_MIN_W, labels, header));
 }
 
 export function nodeHeight(def: NodeDef): number {
   const rows = Math.max(def.inputs.length, def.outputs.length, 1);
-  return Math.max(NODE_MIN_H, NODE_HEADER_H + rows * PORT_ROW_H);
+  return NODE_HEADER_H + rows * PORT_ROW_H; // exactly fits the port rows (no clamp)
 }
 
-// Vertical center (px from card top) for the i-th port of a side with `count` ports.
-export function portTop(def: NodeDef, index: number, count: number): number {
-  const h = nodeHeight(def);
-  const bandTop = NODE_HEADER_H;
-  const band = h - bandTop;
-  return bandTop + (band * (index + 0.5)) / count;
+// Fixed row grid (px from card top) so ports line up across nodes regardless of height.
+export function portTop(index: number): number {
+  return NODE_HEADER_H + PORT_ROW_H * (index + 0.5);
 }

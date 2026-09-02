@@ -1,10 +1,4 @@
-/* Global stylesheet, split by domain. To restyle:
-   - palette/accent  -> styles/tokens.css
-   - a node / variant -> styles/nodes.css
-   - canvas + React Flow -> styles/canvas.css
-   - nav/sidebar/dock -> styles/shell.css
-   - toasts -> styles/toast.css
-   Component-local styles for future UI can move to co-located *.module.css. */
+/* Global stylesheet, split by domain (see the imports below); tokens.css holds the palette. */
 @import "./styles/tokens.css";
 @import "./styles/base.css";
 @import "./styles/shell.css";

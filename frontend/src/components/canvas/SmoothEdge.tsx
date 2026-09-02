@@ -1,6 +1,6 @@
 // Custom edge: plain bezier when clear, one smooth arch when it must clear a node row.
 import { BaseEdge, getBezierPath, useNodes, type EdgeProps, type Node } from "@xyflow/react";
-import { nodeHeight, nodeWidth, resolveNodeDef } from "@/lib/nodeCatalog";
+import { nodeHeight, resolveNodeDef } from "@/lib/nodeCatalog";
 import type { YNodeData } from "@/lib/graph";
 import { useCanvasStore } from "@/store/canvasStore";
 
@@ -19,7 +19,7 @@ interface Rect {
 
 function rectOf(n: Node): Rect {
   const def = resolveNodeDef((n.data as YNodeData)?.type);
-  const w = n.measured?.width ?? (def ? nodeWidth(def) : 0);
+  const w = n.measured?.width ?? 140; // rough fallback before React Flow measures the node
   const h = n.measured?.height ?? (def ? nodeHeight(def) : 0);
   return { left: n.position.x, right: n.position.x + w, top: n.position.y, bottom: n.position.y + h };
 }

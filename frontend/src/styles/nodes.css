@@ -3,8 +3,9 @@
   position: relative;
   border-radius: 5px;
   background: var(--panel);
-  border: 1px solid var(--line2);
+  border: 1px solid var(--line3);
   box-shadow: 0 8px 22px -14px #000;
+  --accent: var(--muted); /* family color; GraphNode overrides per category */
 }
 /* hover/selected: ice outline via box-shadow so it beats variant border colors */
 .yn:hover {
@@ -24,11 +25,11 @@
   top: 11px;
   bottom: 11px;
   width: 2px;
-  background: var(--steel);
+  background: var(--accent);
   border-radius: 2px;
 }
 .yn-head {
-  padding: 9px 12px 0;
+  padding: 12px 12px 0;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.13em;
@@ -42,7 +43,7 @@
   padding: 2px 12px 0;
   font-family: var(--mono);
   font-size: 8.5px;
-  color: var(--faint);
+  color: var(--muted);
   letter-spacing: 0.02em;
 }
 
@@ -69,28 +70,28 @@
 }
 /* role is the prominent label; the shape stacks beneath it, fainter + smaller */
 .yn-plabel .role {
-  color: var(--muted);
+  color: var(--txt2);
 }
 .yn-plabel .shp {
-  color: var(--faint);
+  color: var(--muted);
   font-size: 7px;
   letter-spacing: 0;
 }
 
-/* badge (e.g. "flash") */
+/* category badge (EMBED / ATTN / MLP / NORM / HEAD), tinted by the family accent */
 .yn-badge {
   position: absolute;
   top: -8px;
   right: 12px;
   font-family: var(--mono);
   font-size: 9px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   padding: 2px 7px;
   border-radius: 2px;
   text-transform: uppercase;
-  background: #0a1c24;
-  color: var(--ice);
-  border: 1px solid #2a4d63;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* quant tag inside header */
@@ -123,46 +124,17 @@
   background: #0b1a12;
 }
 
-/* variant: optional (dashed) */
-.yn.opt {
-  border-style: dashed;
-  border-color: #242a36;
-}
-.yn.opt .st {
-  background: var(--faint);
-}
-
 /* variant: io (the _input graph source — a quiet, source-only pseudo-node) */
 .yn.io {
   background: var(--panel2);
   border-style: dashed;
   border-color: #22283440;
 }
-.yn.io .st {
-  background: var(--muted);
-}
 .yn.io .yn-head {
   color: var(--txt2);
 }
 
-/* variant: flash attention (ice) */
-.yn.flash {
-  border-color: #2a4d63;
-}
-.yn.flash .st {
-  background: var(--ice);
-}
-.yn.flash .react-flow__handle {
-  border-color: var(--ice);
-}
-
-/* modifier: quantized (violet overlay) */
+/* modifier: quantized (violet border + the W8/W4 header tag; accent bar stays the family color) */
 .yn.quantized {
   border-color: #332e4d;
-}
-.yn.quantized .st {
-  background: var(--violet);
-}
-.yn.quantized .react-flow__handle {
-  border-color: var(--violet);
 }

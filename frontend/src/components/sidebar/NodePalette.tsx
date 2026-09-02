@@ -1,12 +1,16 @@
-// NodePalette: drag any node type onto the canvas (sampling params aren't nodes).
-import { CATALOG_ORDER, NODE_CATALOG, type NodeVariant } from "@/lib/nodeCatalog";
+// NodePalette: drag any node type onto the canvas, grouped by category.
+import type { CSSProperties } from "react";
+import {
+  CATALOG_ORDER,
+  CATEGORY,
+  CATEGORY_OF,
+  NODE_CATALOG,
+  type NodeCategory,
+} from "@/lib/nodeCatalog";
 
 export const PALETTE_MIME = "application/yapuny-node";
 
-const GROUPS: { title: string; variants: NodeVariant[] }[] = [
-  { title: "Core", variants: ["req"] },
-  { title: "Optional", variants: ["opt", "flash"] },
-];
+const ORDER: NodeCategory[] = ["embedding", "attention", "mlp", "norm", "head"];
 
 function onDragStart(e: React.DragEvent, type: string) {
   e.dataTransfer.setData(PALETTE_MIME, type);
@@ -16,13 +20,15 @@ function onDragStart(e: React.DragEvent, type: string) {
 export function NodePalette() {
   return (
     <>
-      {GROUPS.map((group) => {
-        const types = CATALOG_ORDER.filter((t) => group.variants.includes(NODE_CATALOG[t].variant));
+      {ORDER.map((c) => {
+        const types = CATALOG_ORDER.filter((t) => CATEGORY_OF[t] === c);
         if (types.length === 0) return null;
+        const style: CSSProperties = {};
+        (style as Record<string, string>)["--accent"] = `var(${CATEGORY[c].accent})`;
         return (
-          <section className="grp" key={group.title}>
+          <section className="grp" key={c} style={style}>
             <h3>
-              {group.title}
+              {CATEGORY[c].full}
               <span className="tag">{types.length}</span>
             </h3>
             <div className="pal">
@@ -36,7 +42,9 @@ export function NodePalette() {
                     onDragStart={(e) => onDragStart(e, t)}
                     title={def.subtitle}
                   >
-                    <span className="m">{def.variant === "flash" ? "⚡" : "▪"}</span>
+                    <span className="m" style={{ color: "var(--accent)" }}>
+                      ▪
+                    </span>
                     {def.label}
                   </div>
                 );

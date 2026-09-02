@@ -6,16 +6,15 @@
   overflow: hidden;
   background: var(--bg2);
 }
-/* radial vignette overlay (static, does not pan with the graph) */
+/* subtle edge vignette: transparent stop is high, so only the outer rim darkens */
 .cv::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at 50% 42%, transparent 40%, var(--bg2) 92%);
+  background: radial-gradient(ellipse at 50% 50%, transparent 80%, var(--bg2) 100%);
   pointer-events: none;
   z-index: 4;
 }
-
 /* mode toggle (Train | Inference), pinned top-right over the canvas */
 .mode-toggle {
   position: absolute;

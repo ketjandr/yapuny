@@ -15,7 +15,7 @@ export interface SeedEdge {
   toPort: string;
 }
 
-const COL = 176; // horizontal spacing between stages
+const COL = 194; // horizontal spacing between stages (fits the widest content-sized node)
 const ROW = 120; // main pipeline row (node top y)
 
 export const DEFAULT_LAYOUT: PlacedNode[] = [
@@ -26,7 +26,7 @@ export const DEFAULT_LAYOUT: PlacedNode[] = [
   { id: "emb_drop", type: "dropout", x: 2 * COL, y: ROW },
   // Attention (KV cache dips below the main row)
   { id: "ln1", type: "layernorm", x: 3 * COL, y: ROW },
-  { id: "qkv", type: "qkv_proj", x: 4 * COL, y: ROW - 12 },
+  { id: "qkv", type: "qkv_proj", x: 4 * COL, y: ROW },
   { id: "kv", type: "kv_cache", x: 5 * COL, y: ROW + 150 },
   { id: "attn", type: "attention_score", x: 6 * COL, y: ROW },
   { id: "mask", type: "causal_mask", x: 7 * COL, y: ROW },

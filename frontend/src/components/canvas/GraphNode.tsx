@@ -1,6 +1,9 @@
 // Node card: catalog-driven geometry, inputs on the left edge, outputs on the right.
+import type { CSSProperties } from "react";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import {
+  CATEGORY,
+  CATEGORY_OF,
   formatShape,
   type NodeVariant,
   nodeHeight,
@@ -13,8 +16,6 @@ import { useCanvasStore } from "@/store/canvasStore";
 
 const VARIANT_CLASS: Record<NodeVariant, string> = {
   req: "",
-  opt: "opt",
-  flash: "flash",
   io: "io",
 };
 
@@ -27,9 +28,10 @@ export function GraphNode({ data, selected }: NodeProps) {
     return <div className="yn" style={{ padding: 8 }}>?{type}</div>;
   }
 
-  const w = nodeWidth(def);
+  const w = nodeWidth(def, meta);
   const h = nodeHeight(def);
   const dimmed = mode === "train" && !!def.trainingNoop; // inactive while training
+  const cat = CATEGORY_OF[type] ? CATEGORY[CATEGORY_OF[type]] : null; // family color + badge
   const cls = [
     "yn",
     VARIANT_CLASS[def.variant],
@@ -40,10 +42,13 @@ export function GraphNode({ data, selected }: NodeProps) {
     .filter(Boolean)
     .join(" ");
 
+  const style: CSSProperties = { width: w, height: h };
+  if (cat) (style as Record<string, string>)["--accent"] = `var(${cat.accent})`;
+
   return (
-    <div className={cls} style={{ width: w, height: h }}>
+    <div className={cls} style={style}>
       <div className="st" />
-      {def.badge && <span className="yn-badge">{def.badge}</span>}
+      {cat && <span className="yn-badge">{cat.label}</span>}
 
       <div className="yn-head">
         <span>{def.label}</span>
@@ -57,14 +62,14 @@ export function GraphNode({ data, selected }: NodeProps) {
           id={port.id}
           type="target"
           position={Position.Left}
-          style={{ top: portTop(def, i, def.inputs.length) }}
+          style={{ top: portTop(i) }}
         />
       ))}
       {def.inputs.map((port, i) => (
         <span
           key={`inl-${port.id}`}
           className="yn-plabel in"
-          style={{ top: portTop(def, i, def.inputs.length) }}
+          style={{ top: portTop(i) }}
         >
           <span className="role">{port.label}</span>
           <span className="shp">{formatShape(port.shape, meta, mode)}</span>
@@ -77,14 +82,14 @@ export function GraphNode({ data, selected }: NodeProps) {
           id={port.id}
           type="source"
           position={Position.Right}
-          style={{ top: portTop(def, i, def.outputs.length) }}
+          style={{ top: portTop(i) }}
         />
       ))}
       {def.outputs.map((port, i) => (
         <span
           key={`outl-${port.id}`}
           className="yn-plabel out"
-          style={{ top: portTop(def, i, def.outputs.length) }}
+          style={{ top: portTop(i) }}
         >
           <span className="role">{port.label}</span>
           <span className="shp">{formatShape(port.shape, meta, mode)}</span>

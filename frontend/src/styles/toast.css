@@ -40,8 +40,7 @@
   border-color: #43222c;
   color: #eebac6;
 }
-/* exit: fade + slide up, and collapse height to the (hidden) overlap strip so the
-   toasts below reflow upward smoothly and don't jump when this one is removed */
+/* exit: fade + slide up, collapse to the overlap strip so the toasts below slide up cleanly */
 .toast-leaving {
   opacity: 0;
   transform: translateY(-8px);

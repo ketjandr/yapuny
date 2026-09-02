@@ -1,5 +1,4 @@
-// Reusable toasts: push from anywhere via `toast.error(...)`. Stacks up to MAX, each
-// auto-dismisses after TTL, and is manually closable.
+// Reusable toasts via `toast.error(...)`: stacks up to MAX, auto-dismiss, closable.
 import { create } from "zustand";
 
 export type ToastKind = "error" | "info";
