@@ -124,11 +124,9 @@
   background: #0b1a12;
 }
 
-/* variant: io (the _input graph source — a quiet, source-only pseudo-node) */
+/* variant: io (the _input / _output pseudo-nodes — graph endpoints) */
 .yn.io {
   background: var(--panel2);
-  border-style: dashed;
-  border-color: #22283440;
 }
 .yn.io .yn-head {
   color: var(--txt2);

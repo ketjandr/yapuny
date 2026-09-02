@@ -261,7 +261,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
 
 export const CATALOG_ORDER = Object.keys(NODE_CATALOG);
 
-// UI-only pseudo-node for the compiler-seeded graph input; not in NODE_REGISTRY/palette.
+// UI-only pseudo-nodes for the graph endpoints; not in NODE_REGISTRY/palette.
 export const INPUT_NODE: NodeDef = {
   type: "_input",
   label: "Input",
@@ -272,14 +272,25 @@ export const INPUT_NODE: NodeDef = {
   fusable: false,
   quantizable: false,
 };
+export const OUTPUT_NODE: NodeDef = {
+  type: "_output",
+  label: "Output",
+  subtitle: "logits",
+  variant: "io",
+  inputs: [p("logits", ["T", "V"])],
+  outputs: [],
+  fusable: false,
+  quantizable: false,
+};
 
 export function getNodeDef(type: string): NodeDef | undefined {
   return NODE_CATALOG[type];
 }
 
-// Resolve any renderable node def, including the _input pseudo-node.
+// Resolve any renderable node def, including the _input / _output pseudo-nodes.
 export function resolveNodeDef(type: string): NodeDef | undefined {
   if (type === "_input") return INPUT_NODE;
+  if (type === "_output") return OUTPUT_NODE;
   return NODE_CATALOG[type];
 }
 

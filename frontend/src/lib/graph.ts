@@ -1,16 +1,16 @@
 // Canvas nodes/edges <-> backend GraphRequest. Handle ids are the backend port names.
 import type { Edge, Node } from "@xyflow/react";
-import { DEFAULT_EDGES, DEFAULT_LAYOUT, type SeedEdge } from "./defaultGraph";
+import { DEFAULT_EDGES, DEFAULT_LAYOUT, INPUT_POS, OUTPUT_POS, type SeedEdge } from "./defaultGraph";
 import type { EdgeSchema, GraphMetaSchema, GraphRequest, NodeSchema } from "./types";
 
 export const RF_NODE_TYPE = "graph";
 
 export interface YNodeData extends Record<string, unknown> {
-  type: string; // backend node type key (or "_input")
+  type: string; // backend node type key (or _input / _output)
   quantized: string | null; // "w8" | "w4" | null
 }
 
-const INPUT_POS = { x: -176, y: 120 }; // left of the pipeline (feeds tok/pos emb)
+const isPseudo = (type: string) => type === "_input" || type === "_output";
 
 function rfNode(id: string, type: string, x: number, y: number, quantized: string | null = null): Node {
   return {
@@ -18,7 +18,7 @@ function rfNode(id: string, type: string, x: number, y: number, quantized: strin
     type: RF_NODE_TYPE,
     position: { x, y },
     data: { type, quantized } satisfies YNodeData,
-    deletable: type !== "_input", // the _input pseudo-node is not user-deletable
+    deletable: !isPseudo(type), // the _input / _output pseudo-nodes are not user-deletable
   };
 }
 
@@ -32,31 +32,35 @@ function seedEdgeToRf(e: SeedEdge): Edge {
   };
 }
 
-// fresh canvas: the _input node + the wired seed layout
+// fresh canvas: the _input / _output pseudo-nodes + the wired seed layout
 export function seedToCanvas(): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = [
     rfNode("_input", "_input", INPUT_POS.x, INPUT_POS.y),
     ...DEFAULT_LAYOUT.map((n) => rfNode(n.id, n.type, n.x, n.y)),
+    rfNode("_output", "_output", OUTPUT_POS.x, OUTPUT_POS.y),
   ];
   const edges: Edge[] = DEFAULT_EDGES.map(seedEdgeToRf);
   return { nodes, edges };
 }
 
-// canvas -> GraphRequest; _input is dropped from nodes (compiler seeds it), its edges kept
+// canvas -> GraphRequest. Pseudo-nodes are dropped: the compiler seeds _input (its edges
+// stay valid) and reads logits from lm_head, so edges into _output are dropped too.
 export function canvasToGraph(nodes: Node[], edges: Edge[], meta: GraphMetaSchema): GraphRequest {
   const schemaNodes: NodeSchema[] = nodes
-    .filter((n) => (n.data as YNodeData).type !== "_input")
+    .filter((n) => !isPseudo((n.data as YNodeData).type))
     .map((n) => {
       const d = n.data as YNodeData;
       return { id: n.id, type: d.type, config: {}, quantized: d.quantized ?? null };
     });
 
-  const schemaEdges: EdgeSchema[] = edges.map((e) => ({
-    from_node: e.source,
-    to_node: e.target,
-    from_port: e.sourceHandle ?? "out",
-    to_port: e.targetHandle ?? "x",
-  }));
+  const schemaEdges: EdgeSchema[] = edges
+    .filter((e) => e.target !== "_output")
+    .map((e) => ({
+      from_node: e.source,
+      to_node: e.target,
+      from_port: e.sourceHandle ?? "out",
+      to_port: e.targetHandle ?? "x",
+    }));
 
   return { nodes: schemaNodes, edges: schemaEdges, fusion_groups: [], meta };
 }
@@ -77,6 +81,18 @@ export function graphToCanvas(graph: GraphRequest): { nodes: Node[]; edges: Edge
     target: e.to_node,
     targetHandle: e.to_port ?? "x",
   }));
+  // the backend graph has no _output; re-attach it visually to the lm_head
+  const lmHead = graph.nodes.find((n) => n.type === "lm_head");
+  if (lmHead) {
+    nodes.push(rfNode("_output", "_output", OUTPUT_POS.x, OUTPUT_POS.y));
+    edges.push({
+      id: `${lmHead.id}.out->_output.logits`,
+      source: lmHead.id,
+      sourceHandle: "out",
+      target: "_output",
+      targetHandle: "logits",
+    });
+  }
   return { nodes, edges };
 }
 
