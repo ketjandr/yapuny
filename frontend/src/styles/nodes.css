@@ -7,12 +7,12 @@
   box-shadow: 0 8px 22px -14px #000;
   --accent: var(--muted); /* family color; GraphNode overrides per category */
 }
-/* hover/selected: ice outline via box-shadow so it beats variant border colors */
+/* hover/selected: neutral white-ish ring + glow (color-independent, never fights the accent) */
 .yn:hover {
-  box-shadow: 0 0 0 1px var(--ice-dim), 0 0 11px -4px var(--ice), 0 8px 22px -14px #000;
+  box-shadow: 0 0 0 1px var(--muted), 0 0 11px -5px var(--txt2), 0 8px 22px -14px #000;
 }
 .yn.sel {
-  box-shadow: 0 0 0 1px var(--ice), 0 0 18px -3px var(--ice), 0 12px 30px -14px #000;
+  box-shadow: 0 0 0 1px var(--txt2), 0 0 18px -4px var(--txt), 0 12px 30px -14px #000;
 }
 /* dimmed: node is inactive in the current mode (e.g. kv_cache while training) */
 .yn.dimmed {

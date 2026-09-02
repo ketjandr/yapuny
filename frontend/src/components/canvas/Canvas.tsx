@@ -60,6 +60,7 @@ function CanvasInner() {
         onReconnect={onReconnect}
         onNodeClick={(_, n) => setSelected(n.id)}
         onPaneClick={() => setSelected(null)}
+        connectionRadius={34}
         fitView
         minZoom={0.2}
         proOptions={{ hideAttribution: true }}

@@ -65,16 +65,16 @@
 .react-flow__edge:hover:not(.selected) .react-flow__edge-path {
   stroke: var(--txt2);
 }
-/* selected edge: ice outline + glow (also covers RF's :focus selectors) */
+/* selected edge: neutral white-ish stroke + glow (also covers RF's :focus selectors) */
 .react-flow__edge.selected .react-flow__edge-path,
 .react-flow__edge.selectable:focus .react-flow__edge-path,
 .react-flow__edge.selectable:focus-visible .react-flow__edge-path {
-  stroke: var(--ice);
+  stroke: var(--txt2);
   stroke-width: 2;
-  filter: drop-shadow(0 0 3px var(--ice-dim));
+  filter: drop-shadow(0 0 3px var(--muted));
 }
 .react-flow__connection-path {
-  stroke: var(--ice);
+  stroke: var(--txt2);
   stroke-width: 1.5;
 }
 .react-flow__handle {
@@ -86,9 +86,22 @@
   border: 1px solid var(--muted);
   border-radius: 50%;
 }
+/* transparent grab target: easier to start a drag without enlarging the visible dot */
+.react-flow__handle::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+}
 .react-flow__handle:hover {
-  border-color: var(--ice);
-  box-shadow: 0 0 7px var(--ice);
+  border-color: var(--accent, var(--muted));
+  box-shadow: 0 0 7px var(--accent, var(--muted));
+}
+/* during a connection drag: the source handle + a valid target handle glow the category color */
+.react-flow__handle.connectingfrom,
+.react-flow__handle.valid {
+  border-color: var(--accent, var(--muted));
+  box-shadow: 0 0 10px 1px var(--accent, var(--muted));
 }
 .react-flow__controls {
   border: 1px solid var(--line2);
