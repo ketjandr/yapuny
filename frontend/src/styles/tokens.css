@@ -1,0 +1,28 @@
+/* Design tokens (dark-committed, single visual world). Change the palette here. */
+:root {
+  --bg: #06070a;
+  --bg2: #040507;
+  --panel: #0a0c11;
+  --panel2: #08090d;
+  --line: #141821;
+  --line2: #1e232e;
+  --hair: #0f1219;
+  --txt: #eef1f6;
+  --txt2: #c3c9d4;
+  --muted: #727a8a;
+  --faint: #454b58;
+  --ice: #77d3e6;
+  --ice-dim: #2b5a66;
+  --steel: #8fb2d8;
+  --fuse: #5be39a;
+  --amber: #caa05a;
+  --violet: #9a90cf;
+  --green: #6fbf87;
+  --red: #d9738a;
+  --sans: "Saira", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  /* layout dimensions (shared by the shell + overlays) */
+  --nav-h: 52px;
+  --side-w: 236px;
+  --dock-w: 340px;
+}

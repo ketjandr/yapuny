@@ -14,6 +14,7 @@ import { create } from "zustand";
 import { DEFAULT_META } from "@/lib/defaultGraph";
 import { canvasToGraph, makeNode, seedToCanvas } from "@/lib/graph";
 import type { GraphMetaSchema, GraphRequest } from "@/lib/types";
+import { toast } from "@/store/toastStore";
 
 const seed = seedToCanvas();
 
@@ -39,6 +40,27 @@ interface CanvasState {
   setMode: (mode: CanvasMode) => void;
 
   toGraph: () => GraphRequest;
+}
+
+// is a target port already the destination of an edge (ignoring `exceptId`)?
+function portOccupied(
+  edges: Edge[],
+  target: string | null,
+  targetHandle: string | null | undefined,
+  exceptId?: string,
+): boolean {
+  return edges.some(
+    (e) => e.id !== exceptId && e.target === target && e.targetHandle === targetHandle,
+  );
+}
+
+// guard shared by connect/reconnect: toasts and returns true if the input is taken
+function rejectIfOccupied(edges: Edge[], conn: Connection, exceptId?: string): boolean {
+  if (portOccupied(edges, conn.target, conn.targetHandle, exceptId)) {
+    toast.error("That input is already connected! Only one input per port.");
+    return true;
+  }
+  return false;
 }
 
 // structural changes (vs cosmetic move/select)
@@ -69,17 +91,18 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       needsCompile: s.needsCompile || edgesAreMeaningful(changes),
     })),
 
-  onConnect: (conn) =>
-    set((s) => ({
-      edges: addEdge({ ...conn }, s.edges),
-      needsCompile: true,
-    })),
+  // each input (target) port accepts at most one edge; output ports may fan out
+  onConnect: (conn) => {
+    const { edges } = get();
+    if (rejectIfOccupied(edges, conn)) return;
+    set({ edges: addEdge({ ...conn }, edges), needsCompile: true });
+  },
 
-  onReconnect: (oldEdge, newConnection) =>
-    set((s) => ({
-      edges: reconnectEdge(oldEdge, newConnection, s.edges),
-      needsCompile: true,
-    })),
+  onReconnect: (oldEdge, newConnection) => {
+    const { edges } = get();
+    if (rejectIfOccupied(edges, newConnection, oldEdge.id)) return;
+    set({ edges: reconnectEdge(oldEdge, newConnection, edges), needsCompile: true });
+  },
 
   setSelected: (id) => set({ selectedId: id }),
 

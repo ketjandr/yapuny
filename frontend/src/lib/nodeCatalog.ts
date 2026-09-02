@@ -7,12 +7,14 @@ export type NodeVariant = "req" | "opt" | "flash" | "io";
 // Canonical per-type shapes - non-standard placements would need real shape inference.
 export type Axis = "T" | "S" | "C" | "4C" | "H" | "hd" | "V";
 
-export function resolveAxis(axis: Axis, meta: GraphMetaSchema): string {
+type ShapeMode = "train" | "inference";
+
+export function resolveAxis(axis: Axis, meta: GraphMetaSchema, mode: ShapeMode): string {
   switch (axis) {
     case "T":
-      return "T"; // sequence length (dynamic)
     case "S":
-      return "S"; // key/cache length (dynamic; = T without a cache)
+      // train/prefill runs the full window, so T = S = block_size; inference stays symbolic
+      return mode === "train" ? String(meta.block_size) : axis;
     case "C":
       return String(meta.n_embd);
     case "4C":
@@ -26,9 +28,9 @@ export function resolveAxis(axis: Axis, meta: GraphMetaSchema): string {
   }
 }
 
-// e.g. ["H","T","hd"] + default meta -> "(6, T, 64)"
-export function formatShape(shape: Axis[], meta: GraphMetaSchema): string {
-  return `(${shape.map((a) => resolveAxis(a, meta)).join(", ")})`;
+// ["H","T","hd"] + default meta -> "(6, T, 64)" inference, "(6, 256, 64)" train
+export function formatShape(shape: Axis[], meta: GraphMetaSchema, mode: ShapeMode): string {
+  return `(${shape.map((a) => resolveAxis(a, meta, mode)).join(", ")})`;
 }
 
 export interface PortDef {

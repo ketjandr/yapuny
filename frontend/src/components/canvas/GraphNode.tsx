@@ -67,7 +67,7 @@ export function GraphNode({ data, selected }: NodeProps) {
           style={{ top: portTop(def, i, def.inputs.length) }}
         >
           <span className="role">{port.label}</span>
-          <span className="shp">{formatShape(port.shape, meta)}</span>
+          <span className="shp">{formatShape(port.shape, meta, mode)}</span>
         </span>
       ))}
 
@@ -87,7 +87,7 @@ export function GraphNode({ data, selected }: NodeProps) {
           style={{ top: portTop(def, i, def.outputs.length) }}
         >
           <span className="role">{port.label}</span>
-          <span className="shp">{formatShape(port.shape, meta)}</span>
+          <span className="shp">{formatShape(port.shape, meta, mode)}</span>
         </span>
       ))}
 

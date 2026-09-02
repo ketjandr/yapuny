@@ -1,0 +1,168 @@
+/* Graph node card + variants. Add a new node variant here (+ VARIANT_CLASS in GraphNode). */
+.yn {
+  position: relative;
+  border-radius: 5px;
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  box-shadow: 0 8px 22px -14px #000;
+}
+/* hover/selected: ice outline via box-shadow so it beats variant border colors */
+.yn:hover {
+  box-shadow: 0 0 0 1px var(--ice-dim), 0 0 11px -4px var(--ice), 0 8px 22px -14px #000;
+}
+.yn.sel {
+  box-shadow: 0 0 0 1px var(--ice), 0 0 18px -3px var(--ice), 0 12px 30px -14px #000;
+}
+/* dimmed: node is inactive in the current mode (e.g. kv_cache while training) */
+.yn.dimmed {
+  opacity: 0.34;
+  transition: opacity 0.15s ease;
+}
+.yn .st {
+  position: absolute;
+  left: -1px;
+  top: 11px;
+  bottom: 11px;
+  width: 2px;
+  background: var(--steel);
+  border-radius: 2px;
+}
+.yn-head {
+  padding: 9px 12px 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: #eef2f8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.yn-sub {
+  padding: 2px 12px 0;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  color: var(--faint);
+  letter-spacing: 0.02em;
+}
+
+/* port labels (the dot is the RF handle): inputs inside the left edge, outputs the right */
+.yn-plabel {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.1;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  white-space: nowrap;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.yn-plabel.in {
+  left: 10px;
+  align-items: flex-start;
+}
+.yn-plabel.out {
+  right: 10px;
+  align-items: flex-end;
+}
+/* role is the prominent label; the shape stacks beneath it, fainter + smaller */
+.yn-plabel .role {
+  color: var(--muted);
+}
+.yn-plabel .shp {
+  color: var(--faint);
+  font-size: 7px;
+  letter-spacing: 0;
+}
+
+/* badge (e.g. "flash") */
+.yn-badge {
+  position: absolute;
+  top: -8px;
+  right: 12px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  background: #0a1c24;
+  color: var(--ice);
+  border: 1px solid #2a4d63;
+}
+
+/* quant tag inside header */
+.qtag {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 0 5px;
+  border-radius: 2px;
+  background: #17142a;
+  color: #bcb2e8;
+  border: 1px solid #332e4d;
+  letter-spacing: 0.04em;
+}
+
+/* fusion port (decorative for now: bottom-center diamond on fusable nodes) */
+.yn-fport {
+  position: absolute;
+  bottom: -6px;
+  left: calc(50% - 5px);
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  background: var(--bg2);
+  border: 1px solid var(--faint);
+}
+.yn-fport.on {
+  border-color: var(--fuse);
+  box-shadow: 0 0 9px var(--fuse);
+  background: #0b1a12;
+}
+
+/* variant: optional (dashed) */
+.yn.opt {
+  border-style: dashed;
+  border-color: #242a36;
+}
+.yn.opt .st {
+  background: var(--faint);
+}
+
+/* variant: io (the _input graph source — a quiet, source-only pseudo-node) */
+.yn.io {
+  background: var(--panel2);
+  border-style: dashed;
+  border-color: #22283440;
+}
+.yn.io .st {
+  background: var(--muted);
+}
+.yn.io .yn-head {
+  color: var(--txt2);
+}
+
+/* variant: flash attention (ice) */
+.yn.flash {
+  border-color: #2a4d63;
+}
+.yn.flash .st {
+  background: var(--ice);
+}
+.yn.flash .react-flow__handle {
+  border-color: var(--ice);
+}
+
+/* modifier: quantized (violet overlay) */
+.yn.quantized {
+  border-color: #332e4d;
+}
+.yn.quantized .st {
+  background: var(--violet);
+}
+.yn.quantized .react-flow__handle {
+  border-color: var(--violet);
+}

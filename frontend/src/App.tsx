@@ -2,6 +2,7 @@
 import { Navbar } from "@/components/Navbar";
 import { Canvas } from "@/components/canvas/Canvas";
 import { Sidebar } from "@/components/sidebar/Sidebar";
+import { ToastContainer } from "@/components/Toast";
 import { ConfigPanel } from "@/components/panels/ConfigPanel";
 import { TrainingPanel } from "@/components/panels/TrainingPanel";
 import { GenerationPanel } from "@/components/panels/GenerationPanel";
@@ -21,6 +22,7 @@ export default function App() {
           <BenchmarkPanel />
         </aside>
       </div>
+      <ToastContainer />
     </div>
   );
 }

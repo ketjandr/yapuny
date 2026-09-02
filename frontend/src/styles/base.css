@@ -1,0 +1,38 @@
+/* Minimal reset (replaces Tailwind preflight) + document base + helpers. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+button {
+  font-family: inherit;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* typographic helpers */
+.mono {
+  font-family: var(--mono);
+}
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.up {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
