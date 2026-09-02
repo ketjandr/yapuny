@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import torch
 
 from server.compiler.compiler import GraphModule
+from server.compiler.utils import logical_node_id
 
 
 @dataclass
@@ -99,7 +100,8 @@ def _profile_nodes(model: GraphModule, run, device: torch.device) -> dict[str, f
 
 @dataclass
 class NodeProfile:
-    node_id: str
+    node_id: str  # the real (unrolled) module id, e.g. l0_mlp_up
+    logical_id: str  # the per-block id it maps to, e.g. mlp_up (for grouping/display)
     self_us: float
     pct: float
 
@@ -158,7 +160,9 @@ def profile_graph(
     total = sum(node_times.values()) or 1.0
     nodes = sorted(
         [
-            NodeProfile(node_id=nid, self_us=us, pct=us / total * 100)
+            NodeProfile(
+                node_id=nid, logical_id=logical_node_id(nid), self_us=us, pct=us / total * 100
+            )
             for nid, us in node_times.items()
         ],
         key=lambda n: n.self_us,

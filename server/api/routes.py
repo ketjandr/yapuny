@@ -28,10 +28,11 @@ worker = Worker()
 
 @router.post("/graph/validate", tags=["graph"])
 def validate_graph(request: GraphRequest):
+    from server.compiler.utils import expand_blocks
     from server.compiler.validator import GraphValidator
     from server.models.graph import GraphSpec
 
-    graph = GraphSpec.from_dict(request.model_dump())
+    graph = expand_blocks(GraphSpec.from_dict(request.model_dump()))
     result = GraphValidator().validate(graph)
     return {
         "valid": result.valid,

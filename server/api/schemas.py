@@ -28,6 +28,10 @@ class FusionGroupSchema(BaseSchema):
     nodes: list[str]
 
 
+class BlockSchema(BaseSchema):
+    nodes: list[str]
+
+
 class GraphMetaSchema(BaseSchema):
     n_layer: int = 6
     n_head: int = 6
@@ -42,6 +46,7 @@ class GraphRequest(BaseSchema):
     edges: list[EdgeSchema]
     fusion_groups: list[FusionGroupSchema] = Field(default_factory=list)
     meta: GraphMetaSchema = Field(default_factory=GraphMetaSchema)
+    block: BlockSchema | None = None
 
 
 class ModelGraphRequest(BaseSchema):

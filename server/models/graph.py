@@ -25,6 +25,11 @@ class FusionGroup:
 
 
 @dataclass
+class BlockSpec:
+    nodes: list[str]
+
+
+@dataclass
 class GraphMeta:
     n_layer: int = 6
     n_head: int = 6
@@ -40,6 +45,7 @@ class GraphSpec:
     edges: list[EdgeSpec]
     fusion_groups: list[FusionGroup] = field(default_factory=list)
     meta: GraphMeta = field(default_factory=GraphMeta)
+    block: BlockSpec | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> GraphSpec:
@@ -47,4 +53,6 @@ class GraphSpec:
         edges = [EdgeSpec(**e) for e in data["edges"]]
         fusion_groups = [FusionGroup(nodes=fg["nodes"]) for fg in data.get("fusion_groups", [])]
         meta = GraphMeta(**data.get("meta", {}))
-        return cls(nodes=nodes, edges=edges, fusion_groups=fusion_groups, meta=meta)
+        block_data = data.get("block")
+        block = BlockSpec(nodes=block_data["nodes"]) if block_data else None
+        return cls(nodes=nodes, edges=edges, fusion_groups=fusion_groups, meta=meta, block=block)

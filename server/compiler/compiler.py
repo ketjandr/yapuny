@@ -8,7 +8,7 @@ from torch.nn import functional as F
 
 from server.compiler.fusion_registry import apply_fusion
 from server.compiler.node_registry import NODE_REGISTRY, get_build_kwargs
-from server.compiler.utils import topo_sort
+from server.compiler.utils import expand_blocks, topo_sort
 from server.compiler.validator import GraphValidator
 from server.models.graph import GraphSpec
 
@@ -111,6 +111,7 @@ class GraphCompiler:
         graph: GraphSpec,
         pretrained_state: dict | None = None,
     ) -> GraphModule:
+        graph = expand_blocks(graph)  # unroll the repeated block before building
         result = self.validator.validate(graph)
         if not result.valid:
             raise ValueError(f"invalid graph: {result.errors}")

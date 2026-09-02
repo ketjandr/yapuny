@@ -18,6 +18,7 @@ from data.tokenizer import (
 )
 from server.compiler.compiler import GraphCompiler, GraphModule, cache_length
 from server.compiler.utils import (
+    expand_blocks,
     graph_full_hash,
     graph_structure_hash,
     has_inference_opts,
@@ -349,18 +350,21 @@ class Worker:
 
     def _unfused_state(self, model, graph: GraphSpec) -> dict:
         """Return trained weights in unfused form so any graph variant can reload them.
-        Storage-boundary guard: keeps stored weights canonical/unfused. Training currently
-        always passes a plain graph (fast path); the fusion branch is the unfuse step that
-        TODO: fused training will reuse (train fused -> unfuse for storage)."""
+        Today training always passes a plain graph, so this hits the fast path below.
+        TODO: fused training (train fused -> unfuse for storage) will exercise the fusion branch;
+        it needs backward kernels for the fusion ops, which don't exist yet."""
         if not graph.fusion_groups:
             return model.state_dict()
 
         from copy import deepcopy
 
-        node_types = {n.id: n.type for n in graph.nodes}
+        # the compiled models carry the unrolled ids, so map over the expanded graph's
+        # nodes/fusion groups (no-op when there is no block, so non-block is unchanged)
+        expanded = expand_blocks(graph)
+        node_types = {n.id: n.type for n in expanded.nodes}
 
         fused_node_ids = set()
-        for fg in graph.fusion_groups:
+        for fg in expanded.fusion_groups:
             fused_node_ids.update(fg.nodes)
 
         unfused_graph = deepcopy(graph)
@@ -373,7 +377,7 @@ class Worker:
                 dst = unfused_model.node_modules[nid]
                 dst.load_state_dict(src.state_dict())
 
-        for fg in graph.fusion_groups:
+        for fg in expanded.fusion_groups:
             fused_id = "_fused_" + "_".join(fg.nodes)
             fused_module = model.node_modules[fused_id]
 

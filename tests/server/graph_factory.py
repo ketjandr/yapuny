@@ -170,3 +170,12 @@ def default_gpt_graph(
             "dropout": dropout,
         },
     }
+
+
+def blocked_gpt_graph(n_layer: int = 6, **meta) -> dict:
+    """The compact form: one logical block + a block spec the compiler unrolls n_layer
+    times (vs default_gpt_graph's explicit N-block stack). Same architecture either way."""
+    g = default_gpt_graph(n_layer=1, **meta)
+    g["block"] = {"nodes": [n["id"] for n in make_block_nodes(0)]}
+    g["meta"]["n_layer"] = n_layer
+    return g
