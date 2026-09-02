@@ -57,7 +57,7 @@ function portOccupied(
 // guard shared by connect/reconnect: toasts and returns true if the input is taken
 function rejectIfOccupied(edges: Edge[], conn: Connection, exceptId?: string): boolean {
   if (portOccupied(edges, conn.target, conn.targetHandle, exceptId)) {
-    toast.error("That input is already connected! Only one input per port.");
+    toast.error("Only one input per port, input was already connected!");
     return true;
   }
   return false;

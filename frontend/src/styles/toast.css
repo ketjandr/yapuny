@@ -10,40 +10,63 @@
   flex-direction: column;
   align-items: center;
   pointer-events: none;
+  --toast-overlap: 26px; /* card-stack overlap; also the exit collapse target */
 }
 .toast {
   position: relative;
   pointer-events: auto;
   display: flex;
   align-items: center;
-  width: 560px;
+  width: 500px;
   max-width: calc(100% - 24px);
+  max-height: 120px; /* generous; collapses on exit so the toasts below slide up */
   padding: 10px 12px;
   border-radius: 6px;
   border: 1px solid var(--line2);
   background: color-mix(in srgb, var(--panel) 97%, transparent);
   backdrop-filter: blur(8px);
   box-shadow: 0 16px 38px -18px #000;
-  font-size: 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
   color: var(--txt2);
   animation: toast-in 0.18s ease;
+  transition: opacity 0.2s ease, transform 0.2s ease, max-height 0.2s ease;
 }
 /* pack of cards: each new toast overlaps the previous, leaving a thin edge peeking */
 .toast + .toast {
-  margin-top: -26px;
+  margin-top: calc(-1 * var(--toast-overlap));
 }
 .toast-error {
   border-color: #43222c;
   color: #eebac6;
 }
+/* exit: fade + slide up, and collapse height to the (hidden) overlap strip so the
+   toasts below reflow upward smoothly and don't jump when this one is removed */
 .toast-leaving {
-  animation: toast-out 0.2s ease forwards;
+  opacity: 0;
+  transform: translateY(-8px);
+  max-height: var(--toast-overlap);
+  overflow: hidden;
   pointer-events: none;
+}
+.toast-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  color: var(--muted);
+}
+.toast-error .toast-icon {
+  color: var(--red);
+}
+.toast-info .toast-icon {
+  color: var(--ice);
 }
 .toast-msg {
   flex: 1;
   text-align: center;
-  padding: 0 24px; /* symmetric room so the centered text clears the close button */
+  padding: 0 30px; /* symmetric room so the centered text clears the icon + close button */
 }
 .toast-x {
   position: absolute;
@@ -72,18 +95,9 @@
     transform: translateY(0);
   }
 }
-@keyframes toast-out {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .toast {
     animation: none;
+    transition: none;
   }
 }
