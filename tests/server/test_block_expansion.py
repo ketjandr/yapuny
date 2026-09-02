@@ -51,11 +51,14 @@ def test_multi_output_block_rejected():
         expand_blocks(GraphSpec.from_dict(g))
 
 
-def test_logical_node_id_strips_layer_prefix():
+def test_logical_node_id_groups_layers():
     assert logical_node_id("l0_mlp_up") == "mlp_up"
     assert logical_node_id("l12_b0_qkv") == "b0_qkv"
     assert logical_node_id("emb_drop") == "emb_drop"  # non-block node unchanged
-    assert logical_node_id("_fused_l0_mlp_up_l0_mlp_act") == "_fused_l0_mlp_up_l0_mlp_act"
+    # a fused kernel prefixes each member, so the same fused group across layers collapses to one
+    f0 = logical_node_id("_fused_l0_mlp_up_l0_mlp_act")
+    f1 = logical_node_id("_fused_l1_mlp_up_l1_mlp_act")
+    assert f0 == f1 == "_fused_mlp_up_mlp_act"
 
 
 def test_block_survives_schema_roundtrip():

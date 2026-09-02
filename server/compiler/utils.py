@@ -158,10 +158,9 @@ def expand_blocks(graph: GraphSpec) -> GraphSpec:
 
 
 def logical_node_id(nid: str) -> str:
-    """Map an unrolled node id back to its logical (per-block) id by stripping the
-    l{layer}_ prefix expand_blocks adds. No-op for non-block nodes."""
-    m = re.match(r"l\d+_(.+)", nid)
-    return m.group(1) if m else nid
+    """Map an unrolled node id back to its logical (per-block) id by stripping every l{layer}_
+    prefix expand_blocks adds - including the copies embedded inside a fused kernel's id."""
+    return re.sub(r"l\d+_", "", nid)
 
 
 def has_inference_opts(graph: GraphSpec) -> bool:
