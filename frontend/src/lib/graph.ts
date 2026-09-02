@@ -96,7 +96,26 @@ export function graphToCanvas(graph: GraphRequest): { nodes: Node[]; edges: Edge
   return { nodes, edges };
 }
 
-export function makeNode(type: string, position: { x: number; y: number }): Node {
+export function makeNode(
+  type: string,
+  position: { x: number; y: number },
+  quantized: string | null = null,
+): Node {
   const id = `${type}_${Math.random().toString(36).slice(2, 7)}`;
-  return rfNode(id, type, position.x, position.y);
+  return rfNode(id, type, position.x, position.y, quantized);
+}
+
+export function makeEdge(
+  source: string,
+  sourceHandle: string | null | undefined,
+  target: string,
+  targetHandle: string | null | undefined,
+): Edge {
+  return {
+    id: `${source}.${sourceHandle}->${target}.${targetHandle}`,
+    source,
+    sourceHandle: sourceHandle ?? undefined,
+    target,
+    targetHandle: targetHandle ?? undefined,
+  };
 }
