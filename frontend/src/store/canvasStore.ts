@@ -13,7 +13,7 @@ import {
 import { create } from "zustand";
 import { analyzeBlock } from "@/lib/block";
 import { DEFAULT_META } from "@/lib/defaultGraph";
-import { FUSE_PORT, isFusionEdge, validateFusionConnect } from "@/lib/fusion";
+import { FUSE_PORT, fusionChainError, isFusionEdge, validateFusionConnect } from "@/lib/fusion";
 import { canvasToGraph, makeEdge, makeFusionEdge, makeNode, seedToCanvas, type YNodeData } from "@/lib/graph";
 import type { GraphMetaSchema, GraphRequest } from "@/lib/types";
 import { toast } from "@/store/toastStore";
@@ -171,13 +171,26 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       return;
     }
     if (rejectIfOccupied(edges, conn)) return;
-    set({ edges: addEdge({ ...conn }, edges), needsCompile: true });
+    // a data edge must not break an existing fusion chain (fuse-first-then-connect)
+    const next = addEdge({ ...conn }, edges);
+    const err = fusionChainError(next);
+    if (err) {
+      toast.error(err);
+      return;
+    }
+    set({ edges: next, needsCompile: true });
   },
 
   onReconnect: (oldEdge, newConnection) => {
     const { edges } = get();
     if (rejectIfOccupied(edges, newConnection, oldEdge.id)) return;
-    set({ edges: reconnectEdge(oldEdge, newConnection, edges), needsCompile: true });
+    const next = reconnectEdge(oldEdge, newConnection, edges);
+    const err = fusionChainError(next);
+    if (err) {
+      toast.error(err);
+      return;
+    }
+    set({ edges: next, needsCompile: true });
   },
 
   setSelected: (id) => set({ selectedId: id }),

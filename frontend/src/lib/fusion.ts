@@ -29,54 +29,39 @@ export function fusedNodeIds(edges: Edge[]): Set<string> {
   return ids;
 }
 
-// Connect-time validation for a new fusion edge
-export function validateFusionConnect(source: string, target: string, edges: Edge[]): string | null {
+// Every fusion group's internal data edges must form a straight chain.
+export function fusionChainError(edges: Edge[]): string | null {
   const dataEdges = edges.filter((e) => !isFusionEdge(e));
-  const hasData = (a: string, b: string) => dataEdges.some((e) => e.source === a && e.target === b);
+  for (const group of deriveFusionGroups(edges)) {
+    const set = new Set(group);
+    const outDeg = new Map<string, number>();
+    const inDeg = new Map<string, number>();
+    for (const e of dataEdges) {
+      if (set.has(e.source) && set.has(e.target)) {
+        outDeg.set(e.source, (outDeg.get(e.source) ?? 0) + 1);
+        inDeg.set(e.target, (inDeg.get(e.target) ?? 0) + 1);
+      }
+    }
+    for (const n of group) {
+      if ((outDeg.get(n) ?? 0) > 1) return "A node in the group can't feed two fused nodes!";
+      if ((inDeg.get(n) ?? 0) > 1) return "A node in the group can't be fed by two fused nodes!";
+      if ((outDeg.get(n) ?? 0) >= 1 && dataEdges.some((e) => e.source === n && !set.has(e.target)))
+        return "A non-final node in the group can't feed an external node!";
+    }
+  }
+  return null;
+}
 
-  // the two nodes must be directly data-connected
+// Connect-time validation for a new fusion edge: the pair must be directly data-connected, and
+// the resulting groups must still be straight chains.
+export function validateFusionConnect(source: string, target: string, edges: Edge[]): string | null {
+  const hasData = (a: string, b: string) =>
+    edges.some((e) => !isFusionEdge(e) && e.source === a && e.target === b);
   if (!hasData(source, target) && !hasData(target, source)) {
     return "Fusion needs a direct connection between the two nodes!";
   }
-
-  // the fusion group this connection would form (existing fusion edges + this one, undirected)
-  const adj = new Map<string, string[]>();
-  const link = (a: string, b: string) => (adj.get(a) ?? adj.set(a, []).get(a)!).push(b);
-  for (const e of edges) {
-    if (isFusionEdge(e)) {
-      link(e.source, e.target);
-      link(e.target, e.source);
-    }
-  }
-  link(source, target);
-  link(target, source);
-  const group = new Set<string>([source]);
-  const stack = [source];
-  while (stack.length) {
-    for (const m of adj.get(stack.pop()!) ?? []) {
-      if (!group.has(m)) {
-        group.add(m);
-        stack.push(m);
-      }
-    }
-  }
-
-  // (C) the group's internal data edges must form a straight chain
-  const outDeg = new Map<string, number>();
-  const inDeg = new Map<string, number>();
-  for (const e of dataEdges) {
-    if (group.has(e.source) && group.has(e.target)) {
-      outDeg.set(e.source, (outDeg.get(e.source) ?? 0) + 1);
-      inDeg.set(e.target, (inDeg.get(e.target) ?? 0) + 1);
-    }
-  }
-  for (const n of group) {
-    if ((outDeg.get(n) ?? 0) > 1) return "Fusion error: a node here feeds two fused nodes!";
-    if ((inDeg.get(n) ?? 0) > 1) return "Fusion error: a node here is fed by two fused nodes!";
-    if ((outDeg.get(n) ?? 0) >= 1 && dataEdges.some((e) => e.source === n && !group.has(e.target)))
-      return "Fusion error: a mid-chain node feeds an external node!";
-  }
-  return null;
+  const probe = { id: "__probe__", type: "fusion", source, target } as Edge;
+  return fusionChainError([...edges, probe]);
 }
 
 // -- validation (against the backend fusion catalog, cached client-side) --
