@@ -140,19 +140,21 @@
 .react-flow__edge:hover:not(.selected) .react-flow__edge-path {
   stroke: var(--txt2);
 }
-/* selected edge: neutral white-ish stroke + glow (also covers RF's :focus selectors) */
+/* edges the current block error blames (multiple input/output tensors): glowing red */
+.react-flow__edge.edge-error .react-flow__edge-path {
+  stroke: var(--red);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px var(--red));
+}
+/* selected edge: neutral white-ish stroke + glow. Ordered AFTER .edge-error so selection wins the
+   specificity tie and stays white even for an error edge or when focus moves off (multi-select).
+   Also covers RF's :focus selectors. */
 .react-flow__edge.selected .react-flow__edge-path,
 .react-flow__edge.selectable:focus .react-flow__edge-path,
 .react-flow__edge.selectable:focus-visible .react-flow__edge-path {
   stroke: var(--txt2);
   stroke-width: 2;
   filter: drop-shadow(0 0 3px var(--muted));
-}
-/* edges the current block error blames (multiple input/output tensors): glowing red */
-.react-flow__edge.edge-error .react-flow__edge-path {
-  stroke: var(--red);
-  stroke-width: 2;
-  filter: drop-shadow(0 0 4px var(--red));
 }
 .react-flow__connection-path {
   stroke: var(--txt2);
