@@ -1,6 +1,7 @@
 // Canvas nodes/edges <-> backend GraphRequest. Handle ids are the backend port names.
 import type { Edge, Node } from "@xyflow/react";
 import { DEFAULT_EDGES, DEFAULT_LAYOUT, INPUT_POS, OUTPUT_POS, type SeedEdge } from "./defaultGraph";
+import { FUSE_PORT, isFusionEdge } from "./fusion";
 import type { EdgeSchema, GraphMetaSchema, GraphRequest, NodeSchema } from "./types";
 
 export const RF_NODE_TYPE = "graph";
@@ -59,7 +60,7 @@ export function canvasToGraph(
     });
 
   const schemaEdges: EdgeSchema[] = edges
-    .filter((e) => e.target !== "_output")
+    .filter((e) => e.target !== "_output" && !isFusionEdge(e)) // fusion is visual-only
     .map((e) => ({
       from_node: e.source,
       to_node: e.target,
@@ -124,5 +125,17 @@ export function makeEdge(
     sourceHandle: sourceHandle ?? undefined,
     target,
     targetHandle: targetHandle ?? undefined,
+  };
+}
+
+// a fusion stream between two nodes' bottom diamond ports (visual-only)
+export function makeFusionEdge(source: string, target: string): Edge {
+  return {
+    id: `fuse:${source}->${target}`,
+    type: "fusion",
+    source,
+    sourceHandle: FUSE_PORT,
+    target,
+    targetHandle: FUSE_PORT,
   };
 }

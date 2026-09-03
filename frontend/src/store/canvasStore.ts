@@ -13,7 +13,8 @@ import {
 import { create } from "zustand";
 import { analyzeBlock } from "@/lib/block";
 import { DEFAULT_META } from "@/lib/defaultGraph";
-import { canvasToGraph, makeEdge, makeNode, seedToCanvas, type YNodeData } from "@/lib/graph";
+import { FUSE_PORT, isFusionEdge, validateFusionConnect } from "@/lib/fusion";
+import { canvasToGraph, makeEdge, makeFusionEdge, makeNode, seedToCanvas, type YNodeData } from "@/lib/graph";
 import type { GraphMetaSchema, GraphRequest } from "@/lib/types";
 import { toast } from "@/store/toastStore";
 
@@ -40,10 +41,14 @@ function placeClipboard(clip: Clipboard, ox: number, oy: number) {
     idMap.set(n.id, node.id);
     return { ...node, selected: true };
   });
-  const newEdges = clip.edges.map((e) => ({
-    ...makeEdge(idMap.get(e.from)!, e.fromPort, idMap.get(e.to)!, e.toPort),
-    selected: true,
-  }));
+  const newEdges = clip.edges.map((e) => {
+    // fusion edges (both ports are the fuse port) must be recreated as fusion, not data, edges
+    const edge =
+      e.fromPort === FUSE_PORT
+        ? makeFusionEdge(idMap.get(e.from)!, idMap.get(e.to)!)
+        : makeEdge(idMap.get(e.from)!, e.fromPort, idMap.get(e.to)!, e.toPort);
+    return { ...edge, selected: true };
+  });
   return { newNodes, newEdges };
 }
 
@@ -141,9 +146,30 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       needsCompile: s.needsCompile || edgesAreMeaningful(changes),
     })),
 
-  // each input (target) port accepts at most one edge; output ports may fan out
+  // each input (target) port accepts at most one edge; output ports may fan out.
+  // a connection touching a fuse port is a (visual-only) fusion stream, handled separately.
   onConnect: (conn) => {
     const { edges } = get();
+    const srcFuse = conn.sourceHandle === FUSE_PORT;
+    const tgtFuse = conn.targetHandle === FUSE_PORT;
+    if (srcFuse || tgtFuse) {
+      // fusion must join two distinct fuse ports; ignore duplicates (either direction)
+      if (!srcFuse || !tgtFuse || conn.source === conn.target) return;
+      const dupe = edges.some(
+        (e) =>
+          isFusionEdge(e) &&
+          ((e.source === conn.source && e.target === conn.target) ||
+            (e.source === conn.target && e.target === conn.source)),
+      );
+      if (dupe) return;
+      const err = validateFusionConnect(conn.source!, conn.target!, edges);
+      if (err) {
+        toast.error(err);
+        return;
+      }
+      set({ edges: [...edges, makeFusionEdge(conn.source!, conn.target!)] }); // no needsCompile
+      return;
+    }
     if (rejectIfOccupied(edges, conn)) return;
     set({ edges: addEdge({ ...conn }, edges), needsCompile: true });
   },

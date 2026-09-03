@@ -13,6 +13,7 @@ import {
   resolveSubtitle,
 } from "@/lib/nodeCatalog";
 import type { YNodeData } from "@/lib/graph";
+import { FUSE_PORT, fusionVisible } from "@/lib/fusion";
 import { useCanvasStore } from "@/store/canvasStore";
 
 const VARIANT_CLASS: Record<NodeVariant, string> = {
@@ -26,6 +27,9 @@ export function GraphNode({ id, data, selected }: NodeProps) {
   const mode = useCanvasStore((s) => s.mode);
   const blockStart = useCanvasStore((s) => s.blockStart);
   const blockEnd = useCanvasStore((s) => s.blockEnd);
+  const fused = useCanvasStore((s) =>
+    s.edges.some((e) => e.type === "fusion" && (e.source === id || e.target === id)),
+  );
   const def = resolveNodeDef(type);
   if (!def) {
     return <div className="yn" style={{ padding: 8 }}>?{type}</div>;
@@ -51,6 +55,9 @@ export function GraphNode({ id, data, selected }: NodeProps) {
     selected ? "sel" : "",
     quantized ? "quantized" : "",
     dimmed ? "dimmed" : "",
+    // fused aura is inference-only for now; this is a class on the inner div only, so it never
+    // affects the RF node/handle model (the fuse-port Handles below always render).
+    fused && fusionVisible(mode) ? "fused" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -115,7 +122,14 @@ export function GraphNode({ id, data, selected }: NodeProps) {
         </span>
       ))}
 
-      {def.fusable && <span className="yn-fport" />}
+      {/* fusion port: the bottom diamond. Overlapping target + source handles (source on top,
+          so a drag starts from it) let a stream be dragged between any two fusable nodes. */}
+      {def.fusable && (
+        <>
+          <Handle id={FUSE_PORT} type="target" position={Position.Bottom} className={`yn-fuse${fused ? " on" : ""}`} />
+          <Handle id={FUSE_PORT} type="source" position={Position.Bottom} className={`yn-fuse${fused ? " on" : ""}`} />
+        </>
+      )}
     </div>
   );
 }

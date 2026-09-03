@@ -184,6 +184,11 @@
   border-color: var(--accent, var(--muted));
   box-shadow: 0 0 10px 1px var(--accent, var(--muted));
 }
+/* a hovered but invalid target during a drag must not glow (e.g. fusion drag over a data port) */
+.react-flow__handle.connectingto:not(.valid) {
+  border-color: var(--muted);
+  box-shadow: none;
+}
 .react-flow__controls {
   border: 1px solid var(--line2);
   border-radius: 5px;

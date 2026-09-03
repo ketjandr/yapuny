@@ -1,0 +1,250 @@
+/* Fusion: a bright white-green hot core with green lightning tendrils crackling off it (a
+   Loki-timeline / temporal-branch look), on the beam and circulating each fused node's border. */
+
+.fusion-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+/* --- the stream (FusionEdge) --- */
+.fusion-beam path {
+  fill: none;
+  stroke-linecap: round;
+}
+/* the consistent beam behind the flow: a soft green glow + a defined core, always present */
+.fb-haze {
+  stroke: var(--fuse);
+  stroke-width: 13;
+  opacity: 0.16;
+  filter: blur(6px);
+}
+.fb-base {
+  stroke: var(--fuse);
+  stroke-width: 3.5;
+  opacity: 0.34;
+  filter: blur(0.5px);
+}
+/* transparent wide hit area so the beam is clickable/selectable */
+.fb-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 20;
+  pointer-events: stroke;
+}
+/* white selection overlay: invisible until React Flow marks the edge .selected */
+.fb-select {
+  fill: none;
+  stroke: var(--txt);
+  stroke-width: 3;
+  opacity: 0;
+  filter: drop-shadow(0 0 6px var(--txt));
+}
+.react-flow__edge.selected .fb-select {
+  opacity: 0.92;
+}
+/* when selected the beam reads white: wash the steady layers, calm the green energy */
+.react-flow__edge.selected .fb-base {
+  stroke: var(--txt);
+  opacity: 0.9;
+}
+.react-flow__edge.selected .fb-haze {
+  stroke: var(--txt);
+}
+.react-flow__edge.selected .fb-energy,
+.react-flow__edge.selected .fb-energy2 {
+  opacity: 0.4;
+}
+/* two irregular strands of translucent green energy flowing source -> target: the gradient
+   supplies the flowing pulses, the turbulence displacement makes each strand a random shape */
+/* the flowing energy references a shared gradient (green; red when the edge is invalid) - both
+   are defined once in Canvas defs so the flow animation never restarts */
+.fb-energy {
+  stroke: url(#fbg-shared);
+  stroke-width: 9;
+  filter: url(#fusion-flow);
+}
+.fb-energy2 {
+  stroke: url(#fbg-shared);
+  stroke-width: 6;
+  filter: url(#fusion-flow2);
+}
+
+/* --- fused node border: an electric green stream circulating the border --- */
+@property --fuse-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.yn.fused {
+  border-color: color-mix(in srgb, var(--fuse) 60%, transparent);
+  box-shadow:
+    inset 0 0 9px -3px rgba(220, 255, 236, 0.55),
+    0 0 26px -6px color-mix(in srgb, var(--fuse) 75%, transparent),
+    0 8px 22px -14px #000;
+}
+/* selected + fused: keep the white selection ring, keep the green fusion glow (distinguishable) */
+.yn.fused.sel {
+  box-shadow:
+    0 0 0 1.5px var(--txt),
+    0 0 20px -3px var(--txt),
+    inset 0 0 9px -3px rgba(220, 255, 236, 0.55),
+    0 0 24px -7px color-mix(in srgb, var(--fuse) 70%, transparent),
+    0 8px 22px -14px #000;
+}
+/* bright conic band masked to the border ring, crackled by turbulence + a hot white edge */
+.yn.fused::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 8px;
+  padding: 3px;
+  background: conic-gradient(
+    from var(--fuse-angle),
+    transparent 0deg,
+    rgba(91, 227, 154, 0.8) 40deg,
+    rgba(234, 255, 242, 0.98) 80deg,
+    rgba(116, 240, 214, 0.7) 120deg,
+    transparent 160deg,
+    transparent 200deg,
+    rgba(91, 227, 154, 0.8) 240deg,
+    rgba(234, 255, 242, 0.98) 285deg,
+    rgba(116, 240, 214, 0.6) 320deg,
+    transparent 355deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  filter: url(#fusion-turb) blur(0.6px);
+  opacity: 0.9;
+  animation: fuse-spin 4.5s linear infinite;
+  pointer-events: none;
+}
+/* green plasma aura bleeding out behind the node */
+.yn.fused::after {
+  content: "";
+  position: absolute;
+  inset: -9px;
+  border-radius: 13px;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--fuse) 22%, transparent), transparent 78%);
+  filter: blur(6px);
+  opacity: 0.6;
+  z-index: -1;
+  pointer-events: none;
+  animation: fuse-pulse 3.6s ease-in-out infinite;
+}
+@keyframes fuse-spin {
+  to {
+    --fuse-angle: 360deg;
+  }
+}
+@keyframes fuse-pulse {
+  0%,
+  100% {
+    opacity: 0.42;
+  }
+  50% {
+    opacity: 0.82;
+  }
+}
+
+/* --- invalid fusion (kernel unavailable, or the group matches no kernel pattern): red --- */
+.react-flow__edge.fuse-bad .fb-base {
+  stroke: var(--red);
+  opacity: 0.85;
+}
+.react-flow__edge.fuse-bad .fb-haze {
+  stroke: var(--red);
+  opacity: 0.18;
+}
+/* swap the flowing energy to the red shared gradient (still animating, just red) */
+.react-flow__edge.fuse-bad .fb-energy,
+.react-flow__edge.fuse-bad .fb-energy2 {
+  stroke: url(#fbg-shared-bad);
+}
+.react-flow__edge.fuse-bad .fb-select {
+  stroke: var(--red);
+}
+.react-flow__edge.fuse-bad.selected .fb-base {
+  stroke: #ffc2cc;
+  opacity: 0.9;
+}
+.react-flow__edge.fuse-bad.selected .fb-haze {
+  stroke: #ffc2cc;
+}
+/* selected + invalid: green goes bright white on select, so mirror that with a bright red
+   (#ffc2cc core + red halo) — same luminance as the green(white) beam, still reads red */
+.react-flow__edge.fuse-bad.selected .fb-select {
+  stroke: #ffc2cc;
+  filter: drop-shadow(0 0 6px var(--red));
+}
+
+.react-flow__node.fuse-bad .yn.fused {
+  border-color: var(--red);
+  box-shadow: 0 0 22px -6px var(--red), 0 8px 22px -14px #000;
+}
+.react-flow__node.fuse-bad .yn.fused.sel {
+  box-shadow: 0 0 0 1.5px var(--txt), 0 0 20px -3px var(--txt), 0 0 22px -6px var(--red), 0 8px 22px -14px #000;
+}
+.react-flow__node.fuse-bad .yn.fused::before {
+  background: conic-gradient(
+    from var(--fuse-angle),
+    transparent 0deg,
+    rgba(217, 115, 138, 0.85) 45deg,
+    rgba(255, 190, 200, 0.95) 85deg,
+    transparent 150deg,
+    transparent 200deg,
+    rgba(217, 115, 138, 0.85) 245deg,
+    rgba(255, 190, 200, 0.9) 290deg,
+    transparent 350deg
+  );
+}
+.react-flow__node.fuse-bad .yn.fused::after {
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--red) 22%, transparent), transparent 78%);
+}
+.react-flow__node.fuse-bad .yn-fuse.on {
+  border-color: var(--red);
+  box-shadow: 0 0 9px var(--red);
+}
+
+/* --- the fusion port itself (bottom diamond, a React Flow handle) --- */
+.yn-fuse {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--bg2);
+  border: 1px solid var(--faint);
+  transform: translate(-50%, 50%) rotate(45deg); /* keep RF centering, rotate to a diamond */
+}
+.yn-fuse.on {
+  border-color: var(--fuse);
+  background: #0b1a12;
+  box-shadow: 0 0 9px var(--fuse);
+}
+/* fusion ports always glow green (override the shared handle rules' category-accent glow) */
+.yn-fuse:hover,
+.yn-fuse.connectingfrom,
+.yn-fuse.valid {
+  border-color: var(--fuse);
+  box-shadow: 0 0 10px 1px var(--fuse);
+}
+
+/* --- fusion is inference-only for now: hide it when the flag is off (train) --- */
+/* CSS-only: the fuse-port Handles and the fusion edges stay in the React Flow model (identical
+   nodes/edges/handles across modes, so canvas interaction is unaffected) — we only hide their
+   visuals here. The fused-node aura is dropped separately via the `.fused` class in GraphNode. */
+.cv[data-fusion="off"] .yn-fuse {
+  opacity: 0;
+  pointer-events: none; /* can't start/accept a fusion drag in train, but stays registered */
+}
+.cv[data-fusion="off"] .fusion-beam {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yn.fused::before,
+  .yn.fused::after {
+    animation: none;
+  }
+}

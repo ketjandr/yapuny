@@ -59,6 +59,7 @@ export function analyzeBlock(
 ): BlockAnalysis {
   if (!startId || !endId) return { nodeIds: new Set(), valid: false, error: "mark a block start and end" };
 
+  edges = edges.filter((e) => e.type !== "fusion"); // fusion streams are not data flow
   const nodeIds = deriveBlockNodes(edges, startId, endId);
   if (!nodeIds.has(startId) || !nodeIds.has(endId)) {
     return { nodeIds, valid: false, error: "the block end must be downstream of the block start" };

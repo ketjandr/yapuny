@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import {
   Background,
   BackgroundVariant,
+  type Connection,
   Controls,
   type Edge,
   MiniMap,
@@ -14,18 +15,23 @@ import {
 } from "@xyflow/react";
 import { GraphNode } from "./GraphNode";
 import { SmoothEdge } from "./SmoothEdge";
+import { FusionEdge } from "./FusionEdge";
+import { ConnectionLine } from "./ConnectionLine";
 import { BlockWrapper } from "./BlockWrapper";
 import { ModeToggle } from "./ModeToggle";
 import { ContextMenu, type CanvasMenu } from "./ContextMenu";
 import { useCanvasShortcuts } from "./useCanvasShortcuts";
 import { ValidationOverlay } from "./ValidationOverlay";
+import { useQuery } from "@tanstack/react-query";
 import { useCanvasStore } from "@/store/canvasStore";
 import { analyzeBlock } from "@/lib/block";
+import { api } from "@/lib/api";
+import { FUSE_PORT, type FusionCatalog, fusionVisible, validateFusion } from "@/lib/fusion";
 import type { YNodeData } from "@/lib/graph";
 import { PALETTE_MIME } from "@/components/sidebar/NodePalette";
 
 const nodeTypes = { graph: GraphNode };
-const edgeTypes = { default: SmoothEdge };
+const edgeTypes = { default: SmoothEdge, fusion: FusionEdge };
 
 function CanvasInner() {
   const nodes = useCanvasStore((s) => s.nodes);
@@ -38,20 +44,52 @@ function CanvasInner() {
   const addNode = useCanvasStore((s) => s.addNode);
   const blockStart = useCanvasStore((s) => s.blockStart);
   const blockEnd = useCanvasStore((s) => s.blockEnd);
+  const mode = useCanvasStore((s) => s.mode); // only drives the data-fusion CSS marker below
 
-  // highlight the edges the current block error blames (multi input/output tensors)
+  // cached-per-session fusion catalog; validate fusions locally against it (backend re-checks at
+  // compile). Undefined (offline / not fetched) means no flags - optimistic.
+  const { data: fusionCatalog } = useQuery<FusionCatalog>({
+    queryKey: ["fusion-available"],
+    queryFn: api.fusionAvailable,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const fusion = useMemo(
+    () => validateFusion(nodes, edges, fusionCatalog),
+    [nodes, edges, fusionCatalog],
+  );
+
+  // mark the edges the block error blames (multi input/output tensors) + invalid fusion beams;
+  // fusion edges already carry their own type and render as the beam
   const displayEdges = useMemo(() => {
-    const bad = new Set(analyzeBlock(nodes, edges, blockStart, blockEnd).problemEdgeIds ?? []);
-    if (bad.size === 0) return edges;
-    return edges.map((e) =>
-      bad.has(e.id)
-        ? { ...e, className: [e.className, "edge-error"].filter(Boolean).join(" ") }
-        : e,
+    const blockBad = new Set(analyzeBlock(nodes, edges, blockStart, blockEnd).problemEdgeIds ?? []);
+    if (blockBad.size === 0 && fusion.badEdges.size === 0) return edges;
+    return edges.map((e) => {
+      const extra = [
+        blockBad.has(e.id) ? "edge-error" : "",
+        fusion.badEdges.has(e.id) ? "fuse-bad" : "",
+      ].filter(Boolean);
+      return extra.length ? { ...e, className: [e.className, ...extra].filter(Boolean).join(" ") } : e;
+    });
+  }, [nodes, edges, blockStart, blockEnd, fusion]);
+
+  // flag nodes in an invalid fusion group red (via a wrapper class)
+  const displayNodes = useMemo(() => {
+    if (fusion.badNodes.size === 0) return nodes;
+    return nodes.map((n) =>
+      fusion.badNodes.has(n.id)
+        ? { ...n, className: [n.className, "fuse-bad"].filter(Boolean).join(" ") }
+        : n,
     );
-  }, [nodes, edges, blockStart, blockEnd]);
+  }, [nodes, fusion]);
 
   const { screenToFlowPosition } = useReactFlow();
   useCanvasShortcuts();
+
+  // a fusion (diamond) port only connects to another fusion port; data ports only to data ports
+  const isValidConnection = useCallback((c: Connection | Edge) => {
+    return (c.sourceHandle === FUSE_PORT) === (c.targetHandle === FUSE_PORT);
+  }, []);
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -90,16 +128,54 @@ function CanvasInner() {
   }, []);
 
   return (
-    <div className="cv" onDrop={onDrop} onDragOver={onDragOver}>
+    <div className="cv" data-fusion={fusionVisible(mode) ? "on" : "off"} onDrop={onDrop} onDragOver={onDragOver}>
+      {/* shared filter: static turbulence displacement gives the fused-node border its wispy,
+          crackling edge (computed once - motion elsewhere is cheap CSS, not an animated filter) */}
+      <svg className="fusion-defs" aria-hidden="true">
+        <defs>
+          <filter id="fusion-turb" x="-60%" y="-120%" width="220%" height="340%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.014 0.022" numOctaves="2" seed="7" result="n" />
+            <feDisplacementMap in="SourceGraphic" in2="n" scale="8" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+          {/* displace the flowing energy into irregular random shapes (noise is static/cached) */}
+          <filter id="fusion-flow" x="-80%" y="-200%" width="260%" height="500%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.016 0.03" numOctaves="2" seed="5" result="n" />
+            <feDisplacementMap in="SourceGraphic" in2="n" scale="16" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+          <filter id="fusion-flow2" x="-80%" y="-200%" width="260%" height="500%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.024 0.042" numOctaves="2" seed="14" result="n" />
+            <feDisplacementMap in="SourceGraphic" in2="n" scale="13" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+          {/* shared flowing-energy gradients (green + red), defined once so their SMIL clock never
+              restarts - a per-edge gradient re-created each drag frame was the freeze bug. A fixed
+              horizontal repeat tiles all of user space, so every beam samples it wherever it sits. */}
+          <linearGradient id="fbg-shared" gradientUnits="userSpaceOnUse" x1={0} y1={0} x2={78} y2={0} spreadMethod="repeat">
+            <stop offset="0" stopColor="#5be39a" stopOpacity="0" />
+            <stop offset="0.18" stopColor="#8ff2cd" stopOpacity="0.55" />
+            <stop offset="0.4" stopColor="#5be39a" stopOpacity="0" />
+            <stop offset="1" stopColor="#5be39a" stopOpacity="0" />
+            <animateTransform attributeName="gradientTransform" type="translate" from="0 0" to="78 0" dur="2.8s" repeatCount="indefinite" />
+          </linearGradient>
+          <linearGradient id="fbg-shared-bad" gradientUnits="userSpaceOnUse" x1={0} y1={0} x2={78} y2={0} spreadMethod="repeat">
+            <stop offset="0" stopColor="#d9738a" stopOpacity="0" />
+            <stop offset="0.18" stopColor="#ffc2cc" stopOpacity="0.6" />
+            <stop offset="0.4" stopColor="#d9738a" stopOpacity="0" />
+            <stop offset="1" stopColor="#d9738a" stopOpacity="0" />
+            <animateTransform attributeName="gradientTransform" type="translate" from="0 0" to="78 0" dur="2.8s" repeatCount="indefinite" />
+          </linearGradient>
+        </defs>
+      </svg>
       <ReactFlow
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        nodes={nodes}
+        nodes={displayNodes}
         edges={displayEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onReconnect={onReconnect}
+        isValidConnection={isValidConnection}
+        connectionLineComponent={ConnectionLine}
         onNodeClick={(_, n) => setSelected(n.id)}
         onPaneClick={() => setSelected(null)}
         onNodeContextMenu={onNodeContextMenu}

@@ -10,7 +10,7 @@
   flex-direction: column;
   align-items: center;
   pointer-events: none;
-  --toast-overlap: 26px; /* card-stack overlap; also the exit collapse target */
+  --toast-overlap: 15px; /* card-stack overlap; also the exit collapse target */
 }
 .toast {
   position: relative;
