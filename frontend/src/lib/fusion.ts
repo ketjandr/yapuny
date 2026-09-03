@@ -8,10 +8,7 @@ import type { YNodeData } from "./graph";
 export const FUSE_PORT = "fuse"; // handle id of the bottom fusion diamond (source + target)
 
 // Whether fusion is shown for a given canvas mode. Fusion is inference-only for now (the fused
-// kernels can't train yet). This flag ONLY drives appearance (a `fused` class + CSS visibility);
-// it never changes what React Flow tracks (nodes/edges/handles stay identical across modes), so
-// gating it can't affect canvas interaction. When training fusion lands, widen this (e.g.
-// `return true`) and the fusion visuals light up in train too.
+// kernels can't train yet).
 export function fusionVisible(mode: CanvasMode): boolean {
   return mode === "inference";
 }
@@ -39,7 +36,7 @@ export function validateFusionConnect(source: string, target: string, edges: Edg
 
   // the two nodes must be directly data-connected
   if (!hasData(source, target) && !hasData(target, source)) {
-    return "Fusion needs a direct connection between the two nodes";
+    return "Fusion needs a direct connection between the two nodes!";
   }
 
   // the fusion group this connection would form (existing fusion edges + this one, undirected)
@@ -74,8 +71,10 @@ export function validateFusionConnect(source: string, target: string, edges: Edg
     }
   }
   for (const n of group) {
-    if ((outDeg.get(n) ?? 0) > 1) return "Fusion error: a node here feeds two fused nodes";
-    if ((inDeg.get(n) ?? 0) > 1) return "Fusion error: a node here is fed by two fused nodes";
+    if ((outDeg.get(n) ?? 0) > 1) return "Fusion error: a node here feeds two fused nodes!";
+    if ((inDeg.get(n) ?? 0) > 1) return "Fusion error: a node here is fed by two fused nodes!";
+    if ((outDeg.get(n) ?? 0) >= 1 && dataEdges.some((e) => e.source === n && !group.has(e.target)))
+      return "Fusion error: a mid-chain node feeds an external node!";
   }
   return null;
 }
