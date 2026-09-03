@@ -20,14 +20,26 @@ const VARIANT_CLASS: Record<NodeVariant, string> = {
   io: "io",
 };
 
-export function GraphNode({ data, selected }: NodeProps) {
+export function GraphNode({ id, data, selected }: NodeProps) {
   const { type, quantized } = data as YNodeData;
   const meta = useCanvasStore((s) => s.meta);
   const mode = useCanvasStore((s) => s.mode);
+  const blockStart = useCanvasStore((s) => s.blockStart);
+  const blockEnd = useCanvasStore((s) => s.blockEnd);
   const def = resolveNodeDef(type);
   if (!def) {
     return <div className="yn" style={{ padding: 8 }}>?{type}</div>;
   }
+
+  // block boundary marker for this node (a node can be both in a single-node block)
+  const blockRole =
+    id === blockStart && id === blockEnd
+      ? "block"
+      : id === blockStart
+        ? "start"
+        : id === blockEnd
+          ? "end"
+          : null;
 
   const w = nodeWidth(def, meta);
   const h = nodeHeight(def);
@@ -49,6 +61,12 @@ export function GraphNode({ data, selected }: NodeProps) {
   return (
     <div className={cls} style={style}>
       <div className="st" />
+      {(blockRole === "start" || blockRole === "block") && (
+        <span className="yn-bracket start" title="Block start" />
+      )}
+      {(blockRole === "end" || blockRole === "block") && (
+        <span className="yn-bracket end" title="Block end" />
+      )}
       {cat && <span className="yn-badge">{cat.label}</span>}
 
       <div className="yn-head">

@@ -45,7 +45,12 @@ export function seedToCanvas(): { nodes: Node[]; edges: Edge[] } {
 
 // canvas -> GraphRequest. Pseudo-nodes are dropped: the compiler seeds _input (its edges
 // stay valid) and reads logits from lm_head, so edges into _output are dropped too.
-export function canvasToGraph(nodes: Node[], edges: Edge[], meta: GraphMetaSchema): GraphRequest {
+export function canvasToGraph(
+  nodes: Node[],
+  edges: Edge[],
+  meta: GraphMetaSchema,
+  blockNodeIds?: string[],
+): GraphRequest {
   const schemaNodes: NodeSchema[] = nodes
     .filter((n) => !isPseudo((n.data as YNodeData).type))
     .map((n) => {
@@ -62,7 +67,9 @@ export function canvasToGraph(nodes: Node[], edges: Edge[], meta: GraphMetaSchem
       to_port: e.targetHandle ?? "x",
     }));
 
-  return { nodes: schemaNodes, edges: schemaEdges, fusion_groups: [], meta };
+  const graph: GraphRequest = { nodes: schemaNodes, edges: schemaEdges, fusion_groups: [], meta };
+  if (blockNodeIds?.length) graph.block = { nodes: blockNodeIds };
+  return graph;
 }
 
 // GraphRequest -> canvas, grid-laid out (no positions in the schema); for loading saved models

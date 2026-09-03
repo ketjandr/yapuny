@@ -95,6 +95,29 @@
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
+/* block boundary brackets: ice book-ends hugging the entry (left) / exit (right) edge of the
+   start/end nodes. Deliberately a bracket, not a pill, so it never reads as a category badge. */
+/* a solid ice tab tucked behind the node (z-index -1), so the node body overlaps its inner
+   edge and it reads as latched on. Solid fill -> no see-through gap; short -> grips the side. */
+.yn-bracket {
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  width: 13px;
+  background: var(--ice);
+  box-shadow: 0 0 3px -1px var(--ice);
+  z-index: -1;
+  pointer-events: none;
+}
+.yn-bracket.start {
+  left: -7px; /* ~6px tucks under the node, ~7px peeks out */
+  border-radius: 4px 0 0 4px;
+}
+.yn-bracket.end {
+  right: -7px;
+  border-radius: 0 4px 4px 0;
+}
+
 /* quant tag inside header */
 .qtag {
   font-family: var(--mono);

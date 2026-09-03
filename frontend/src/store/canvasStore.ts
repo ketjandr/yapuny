@@ -11,6 +11,7 @@ import {
   reconnectEdge,
 } from "@xyflow/react";
 import { create } from "zustand";
+import { analyzeBlock } from "@/lib/block";
 import { DEFAULT_META } from "@/lib/defaultGraph";
 import { canvasToGraph, makeEdge, makeNode, seedToCanvas, type YNodeData } from "@/lib/graph";
 import type { GraphMetaSchema, GraphRequest } from "@/lib/types";
@@ -62,7 +63,7 @@ interface CanvasState {
   mode: CanvasMode;
   selectedId: string | null;
   needsCompile: boolean;
-  blockStart: string | null; // block boundary markers (wrapper/unroll wiring is a later slice)
+  blockStart: string | null; // block boundary markers; the repeated slice is derived from them
   blockEnd: string | null;
   clipboard: Clipboard | null;
 
@@ -80,6 +81,8 @@ interface CanvasState {
   pasteAtOffset: () => void;
   setBlockStart: (id: string | null) => void;
   setBlockEnd: (id: string | null) => void;
+  clearBlock: () => void;
+  setNLayer: (n: number) => void;
   markCompiled: () => void;
   setMode: (mode: CanvasMode) => void;
 
@@ -101,7 +104,7 @@ function portOccupied(
 // guard shared by connect/reconnect: toasts and returns true if the input is taken
 function rejectIfOccupied(edges: Edge[], conn: Connection, exceptId?: string): boolean {
   if (portOccupied(edges, conn.target, conn.targetHandle, exceptId)) {
-    toast.error("Only one input per port, input was already connected!");
+    toast.error("Only one input tensor per port, it was already connected!");
     return true;
   }
   return false;
@@ -232,15 +235,20 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set((s) => withPaste(s, newNodes, newEdges));
   },
 
-  // block boundary markers; not yet wired to the sent graph, so no needsCompile
-  setBlockStart: (id) => set({ blockStart: id }),
-  setBlockEnd: (id) => set({ blockEnd: id }),
+  // block boundaries change what gets unrolled -> structural (weights invalidate on recompile)
+  setBlockStart: (id) => set({ blockStart: id, needsCompile: true }),
+  setBlockEnd: (id) => set({ blockEnd: id, needsCompile: true }),
+  clearBlock: () => set({ blockStart: null, blockEnd: null, needsCompile: true }),
+  // loop count; also structural (changes the unrolled depth)
+  setNLayer: (n) => set((s) => ({ meta: { ...s.meta, n_layer: Math.max(1, n) }, needsCompile: true })),
 
   markCompiled: () => set({ needsCompile: false }),
   setMode: (mode) => set({ mode }), // not a graph edit -> no needsCompile
 
+  // emit the block only when it is a valid single-in/single-out shape-preserving slice
   toGraph: () => {
     const s = get();
-    return canvasToGraph(s.nodes, s.edges, s.meta);
+    const block = analyzeBlock(s.nodes, s.edges, s.blockStart, s.blockEnd);
+    return canvasToGraph(s.nodes, s.edges, s.meta, block.valid ? [...block.nodeIds] : undefined);
   },
 }));

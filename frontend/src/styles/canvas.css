@@ -148,6 +148,12 @@
   stroke-width: 2;
   filter: drop-shadow(0 0 3px var(--muted));
 }
+/* edges the current block error blames (multiple input/output tensors): glowing red */
+.react-flow__edge.edge-error .react-flow__edge-path {
+  stroke: var(--red);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px var(--red));
+}
 .react-flow__connection-path {
   stroke: var(--txt2);
   stroke-width: 1.5;
@@ -242,4 +248,120 @@
 .vwarn {
   color: var(--amber);
   border-color: #443714;
+}
+
+/* Block region (two layers, both in the flow/viewport layer): the translucent fill sinks
+   behind the nodes + edges, while the frame (border) + header + error float in front. */
+.block-fill {
+  position: absolute;
+  z-index: -1;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--ice) 5%, transparent);
+  pointer-events: none;
+}
+.block-fill.invalid {
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+}
+.block-frame {
+  position: absolute;
+  z-index: 6;
+  border: 1.5px dashed var(--ice-dim);
+  border-radius: 14px;
+  pointer-events: none;
+}
+.block-frame.invalid {
+  border-color: var(--red);
+}
+.block-head {
+  position: absolute;
+  top: -13px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 6px 3px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  pointer-events: auto;
+  box-shadow: 0 10px 22px -14px #000;
+}
+.block-frame.invalid .block-head {
+  border-color: color-mix(in srgb, var(--red) 45%, var(--line2));
+}
+.block-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--txt2);
+}
+.block-x {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.block-count {
+  min-width: 22px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--ice);
+}
+.block-frame.invalid .block-count {
+  color: var(--red);
+}
+.block-x button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  line-height: 1;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.block-x button:hover {
+  color: var(--txt);
+  border-color: var(--line3);
+}
+.block-err {
+  position: absolute;
+  bottom: -13px;
+  left: 16px;
+  padding: 3px 9px;
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--red) 45%, var(--line2));
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--red);
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.block-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 23px;
+  height: 17px;
+  padding-left: 6px; /* room after the divider */
+  line-height: 1;
+  font-size: 13px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-left: 1px solid var(--line2);
+  border-radius: 0;
+  cursor: pointer;
+}
+.block-clear:hover {
+  color: var(--red);
 }

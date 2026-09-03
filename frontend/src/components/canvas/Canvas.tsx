@@ -1,5 +1,5 @@
 // Canvas: renders the graph store via React Flow; palette drop adds nodes.
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -14,11 +14,13 @@ import {
 } from "@xyflow/react";
 import { GraphNode } from "./GraphNode";
 import { SmoothEdge } from "./SmoothEdge";
+import { BlockWrapper } from "./BlockWrapper";
 import { ModeToggle } from "./ModeToggle";
 import { ContextMenu, type CanvasMenu } from "./ContextMenu";
 import { useCanvasShortcuts } from "./useCanvasShortcuts";
 import { ValidationOverlay } from "./ValidationOverlay";
 import { useCanvasStore } from "@/store/canvasStore";
+import { analyzeBlock } from "@/lib/block";
 import type { YNodeData } from "@/lib/graph";
 import { PALETTE_MIME } from "@/components/sidebar/NodePalette";
 
@@ -34,6 +36,19 @@ function CanvasInner() {
   const onReconnect = useCanvasStore((s) => s.onReconnect);
   const setSelected = useCanvasStore((s) => s.setSelected);
   const addNode = useCanvasStore((s) => s.addNode);
+  const blockStart = useCanvasStore((s) => s.blockStart);
+  const blockEnd = useCanvasStore((s) => s.blockEnd);
+
+  // highlight the edges the current block error blames (multi input/output tensors)
+  const displayEdges = useMemo(() => {
+    const bad = new Set(analyzeBlock(nodes, edges, blockStart, blockEnd).problemEdgeIds ?? []);
+    if (bad.size === 0) return edges;
+    return edges.map((e) =>
+      bad.has(e.id)
+        ? { ...e, className: [e.className, "edge-error"].filter(Boolean).join(" ") }
+        : e,
+    );
+  }, [nodes, edges, blockStart, blockEnd]);
 
   const { screenToFlowPosition } = useReactFlow();
   useCanvasShortcuts();
@@ -80,7 +95,7 @@ function CanvasInner() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         nodes={nodes}
-        edges={edges}
+        edges={displayEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
@@ -101,6 +116,7 @@ function CanvasInner() {
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1.5} color="#2b3340" />
+        <BlockWrapper />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable />
       </ReactFlow>

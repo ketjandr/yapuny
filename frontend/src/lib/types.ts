@@ -15,6 +15,9 @@ export interface EdgeSchema {
 export interface FusionGroupSchema {
   nodes: string[];
 }
+export interface BlockSchema {
+  nodes: string[];
+}
 export interface GraphMetaSchema {
   n_layer: number;
   n_head: number;
@@ -27,6 +30,7 @@ export interface GraphRequest {
   nodes: NodeSchema[];
   edges: EdgeSchema[];
   fusion_groups?: FusionGroupSchema[];
+  block?: BlockSchema | null; // the repeated slice; backend unrolls it n_layer times
   meta?: Partial<GraphMetaSchema>;
 }
 export interface ModelGraphRequest {
