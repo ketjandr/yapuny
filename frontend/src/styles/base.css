@@ -20,7 +20,7 @@ body {
   background: var(--bg);
   color: var(--txt);
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;

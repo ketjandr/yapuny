@@ -33,7 +33,7 @@
 .mode-toggle button {
   font-family: inherit;
   padding: 6px 16px;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--muted);
@@ -110,7 +110,7 @@
   font-family: inherit;
   text-align: left;
   padding: 7px 10px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--txt2);
   background: none;
   border: 0;
@@ -233,7 +233,7 @@
 }
 .vrow {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 11.5px;
   letter-spacing: 0.02em;
   padding: 5px 9px;
   border-radius: 3px;
@@ -297,7 +297,7 @@
   border-color: color-mix(in srgb, var(--red) 45%, var(--line2));
 }
 .block-title {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -311,7 +311,7 @@
 .block-count {
   min-width: 22px;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   text-align: center;
   color: var(--ice);
@@ -328,7 +328,7 @@
   padding: 0;
   line-height: 1;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
   background: none;
   border: 1px solid var(--line2);
@@ -352,7 +352,7 @@
   border: 1px solid color-mix(in srgb, var(--red) 45%, var(--line2));
   border-radius: 5px;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--red);
   white-space: nowrap;
   pointer-events: auto;
@@ -365,7 +365,7 @@
   height: 17px;
   padding-left: 6px; /* room after the divider */
   line-height: 1;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
   background: none;
   border: none;

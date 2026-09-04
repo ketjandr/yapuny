@@ -324,10 +324,10 @@ export function resolveNodeDef(type: string): NodeDef | undefined {
 // --- geometry: height grows with port count, width fits the resolved labels ---
 export const NODE_HEADER_H = 50; // header + subtitle band
 export const PORT_ROW_H = 30; // vertical space per port row
-const NODE_MIN_W = 120;
-const SHAPE_CHAR_W = 4.5; // px per char of the 7px mono shape line
-const HEAD_CHAR_W = 8.4; // px per char of the 11px uppercase header (with tracking)
-const SUB_CHAR_W = 5.7; // px per char of the 8.5px mono subtitle formula (with tracking)
+const NODE_MIN_W = 126;
+const SHAPE_CHAR_W = 5.1; // px per char of the 8px mono shape line
+const HEAD_CHAR_W = 9.2; // px per char of the 12px uppercase header (with tracking)
+const SUB_CHAR_W = 6.4; // px per char of the 9.5px mono subtitle formula (with tracking)
 
 function widestLabel(ports: PortDef[], meta: GraphMetaSchema): number {
   if (ports.length === 0) return 0;

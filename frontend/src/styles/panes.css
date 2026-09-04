@@ -45,7 +45,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--txt2); /* whiter glyph, on-theme */
   background: var(--line2); /* light-grey chip, on-theme */
   border: 1px solid var(--line3); /* thin, all-sides (the UA bevel is reset in base.css) */
@@ -106,7 +106,7 @@
 /* tall, slim chevron */
 .pane-chev {
   display: inline-block;
-  font-size: 15px;
+  font-size: 16px;
   transform: scaleY(1.7);
 }
 /* collapsed: the reopen tab floats on the matching screen edge (on top) */
@@ -221,17 +221,17 @@
   align-items: baseline;
   gap: 7px;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--txt2);
 }
 .cfg-hint {
-  font-size: 8.5px;
+  font-size: 9.5px;
   color: var(--faint);
 }
 .cfg-num {
   width: 66px;
   text-align: right;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--txt);
   background: var(--panel);
   border: 1px solid var(--line2);
@@ -285,11 +285,11 @@
   border-radius: 6px;
 }
 .stat-v {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--txt);
 }
 .stat-k {
-  font-size: 8.5px;
+  font-size: 9.5px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--faint);
@@ -307,14 +307,14 @@
   gap: 4px;
 }
 .hp-k {
-  font-size: 8.5px;
+  font-size: 9.5px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--faint);
 }
 .hp-in {
   width: 100%;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--txt);
   background: var(--panel);
   border: 1px solid var(--line2);
@@ -328,7 +328,7 @@
 
 /* buttons */
 .btn {
-  font-size: 10.5px;
+  font-size: 11.5px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   padding: 8px 12px;
@@ -403,7 +403,7 @@
   width: 100%;
   resize: vertical;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--txt);
   background: var(--panel);
   border: 1px solid var(--line2);
@@ -416,7 +416,7 @@
 }
 .gen-output {
   min-height: 84px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   background: var(--panel2);
   border: 1px solid var(--line);
@@ -438,7 +438,7 @@
 }
 .bb-label {
   flex: 0 0 84px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--txt2);
 }
 .bb-track {
