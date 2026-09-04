@@ -88,6 +88,89 @@ class TestBasicValidation:
         assert any("no output port" in e for e in result.errors)
 
 
+# -- connectivity: only the _input -> lm_head chain is validated --
+
+
+class TestConnectivity:
+    def test_orphan_node_ignored(self, validator, valid_graph_dict):
+        # a wired-up-to-nothing node off the chain must not affect validity
+        valid_graph_dict["nodes"].append({"id": "orphan", "type": "layernorm"})
+        graph = GraphSpec.from_dict(valid_graph_dict)
+        result = validator.validate(graph)
+        assert result.valid
+
+    def test_orphan_missing_input_ignored(self, validator, valid_graph_dict):
+        # even an orphan whose own inputs are unconnected is not part of the model
+        valid_graph_dict["nodes"].append({"id": "orphan", "type": "residual_add"})
+        graph = GraphSpec.from_dict(valid_graph_dict)
+        result = validator.validate(graph)
+        assert result.valid
+
+    def test_lm_head_not_wired_to_output(self, validator, valid_graph_dict):
+        # lm_head exists and is fed, but its edge to the _output sink is cut -> no complete chain
+        valid_graph_dict["edges"] = [
+            e for e in valid_graph_dict["edges"] if e["to_node"] != "_output"
+        ]
+        graph = GraphSpec.from_dict(valid_graph_dict)
+        result = validator.validate(graph)
+        assert not result.valid
+        assert any("no complete path" in e for e in result.errors)
+
+    def test_orphaned_required_type_not_counted(self, validator, valid_graph_dict):
+        # bypass softmax (mask -> attn_drop directly) so the chain is complete without it, leaving
+        # softmax orphaned; the orphan must not satisfy the softmax requirement
+        edges = [
+            e
+            for e in valid_graph_dict["edges"]
+            if e["to_node"] != "b0_softmax" and e["from_node"] != "b0_softmax"
+        ]
+        edges.append(
+            {"from_node": "b0_mask", "from_port": "out", "to_node": "b0_attn_drop", "to_port": "x"}
+        )
+        valid_graph_dict["edges"] = edges
+        graph = GraphSpec.from_dict(valid_graph_dict)
+        result = validator.validate(graph)
+        assert not result.valid
+        assert any("missing required node: softmax" in e for e in result.errors)
+
+    def test_missing_input_reported_at_the_node_not_its_consumer(self, validator, valid_graph_dict):
+        # drop out_proj -> resid_drop1: the dropout loses its input but a residual skip keeps a
+        # complete path alive. The break must be reported at the dropout, not blamed on res1.
+        valid_graph_dict["edges"] = [
+            e
+            for e in valid_graph_dict["edges"]
+            if not (e["from_node"] == "b0_out_proj" and e["to_node"] == "b0_resid_drop1")
+        ]
+        graph = GraphSpec.from_dict(valid_graph_dict)
+        result = validator.validate(graph)
+        assert not result.valid
+        assert any("b0_resid_drop1" in e and "'x'" in e for e in result.errors)
+        assert not any("b0_res1" in e for e in result.errors)
+        assert not any("no complete path" in e for e in result.errors)  # residual skip keeps a path
+
+    def test_broken_chain_no_path(self, validator, valid_graph_dict):
+        # cut the final edge into lm_head -> lm_head no longer reachable from _input
+        valid_graph_dict["edges"] = [
+            e for e in valid_graph_dict["edges"] if e["to_node"] != "lm_head"
+        ]
+        graph = GraphSpec.from_dict(valid_graph_dict)
+        result = validator.validate(graph)
+        assert not result.valid
+        assert any("no complete path" in e for e in result.errors)
+
+    def test_unconnected_input_on_chain(self, validator, valid_graph_dict):
+        # remove the residual skip feeding an on-chain residual_add: its input is now unfed
+        valid_graph_dict["edges"] = [
+            e
+            for e in valid_graph_dict["edges"]
+            if not (e["to_node"] == "b0_res1" and e["to_port"] == "residual")
+        ]
+        graph = GraphSpec.from_dict(valid_graph_dict)
+        result = validator.validate(graph)
+        assert not result.valid
+        assert any("b0_res1" in e and "residual" in e for e in result.errors)
+
+
 # -- fusion validation --
 
 

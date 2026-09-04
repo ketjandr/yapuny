@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import type { YNodeData } from "@/lib/graph";
+import { humanizeMessage, structuralIds } from "@/lib/structuralId";
 import { useCanvasStore } from "@/store/canvasStore";
 
 interface ValidationResult {
@@ -64,27 +65,48 @@ export function ValidationOverlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
 
+  // structural (readable) id per node, so backend messages read in canvas terms
+  const ids = useMemo(() => structuralIds(nodes, edges), [nodes, edges]);
+
   return (
     <div className="vpanel">
       {state.kind === "offline" && <div className="vrow vmuted">validation offline — worker unreachable</div>}
       {state.kind === "checking" && <div className="vrow vmuted">validating…</div>}
-      {state.kind === "ok" && <ValidationBody result={state.result} />}
+      {state.kind === "ok" && <ValidationBody result={state.result} ids={ids} />}
     </div>
   );
 }
 
-function ValidationBody({ result }: { result: ValidationResult }) {
+// humanize each message and drop duplicates (a block-internal error repeats per unrolled layer,
+// all collapsing to the same canvas node), preserving order
+function humanizeUnique(msgs: string[], ids: Map<string, string>): string[] {
+  const out: string[] = [];
+  for (const m of msgs) {
+    const h = humanizeMessage(m, ids);
+    if (!out.includes(h)) out.push(h);
+  }
+  return out;
+}
+
+// when there is no input -> output path, every other error (missing required nodes, unconnected
+// inputs, ...) is downstream noise from the same root cause - surface just this one
+const NO_PATH = "no complete path from graph input to output";
+
+function ValidationBody({ result, ids }: { result: ValidationResult; ids: Map<string, string> }) {
   if (result.valid && result.warnings.length === 0) {
     return <div className="vrow vok">✓ graph valid</div>;
   }
+  if (result.errors.includes(NO_PATH)) {
+    return <div className="vrow verr">● {NO_PATH}</div>;
+  }
   return (
     <>
-      {result.errors.map((e, i) => (
+      {humanizeUnique(result.errors, ids).map((e, i) => (
         <div key={`e${i}`} className="vrow verr">
           ● {e}
         </div>
       ))}
-      {result.warnings.map((w, i) => (
+      {humanizeUnique(result.warnings, ids).map((w, i) => (
         <div key={`w${i}`} className="vrow vwarn">
           ▲ {w}
         </div>

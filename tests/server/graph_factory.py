@@ -1,5 +1,10 @@
 """Builds the default GPT graph spec."""
 
+# pseudo-endpoints: never real nodes (no registry entry), they appear only as edge endpoints -
+# _input seeds idx/positions, _output is the logits sink the graph must terminate at.
+INPUT = "_input"
+OUTPUT = "_output"
+
 
 def make_block_nodes(block_idx: int) -> list[dict]:
     """Generate node specs for one transformer block."""
@@ -129,9 +134,9 @@ def default_gpt_graph(
     ]
 
     edges = [
-        {"from_node": "_input", "from_port": "idx", "to_node": "tok_emb", "to_port": "idx"},
+        {"from_node": INPUT, "from_port": "idx", "to_node": "tok_emb", "to_port": "idx"},
         {
-            "from_node": "_input",
+            "from_node": INPUT,
             "from_port": "positions",
             "to_node": "pos_emb",
             "to_port": "positions",
@@ -156,6 +161,10 @@ def default_gpt_graph(
     nodes.append({"id": "lm_head", "type": "lm_head"})
     edges.append({"from_node": last_block, "from_port": "out", "to_node": "ln_f", "to_port": "x"})
     edges.append({"from_node": "ln_f", "from_port": "out", "to_node": "lm_head", "to_port": "x"})
+    # the graph terminates at the _output pseudo-sink; validation needs an _input -> _output path
+    edges.append(
+        {"from_node": "lm_head", "from_port": "out", "to_node": OUTPUT, "to_port": "logits"}
+    )
 
     return {
         "nodes": nodes,

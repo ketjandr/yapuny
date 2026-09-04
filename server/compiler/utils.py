@@ -27,9 +27,9 @@ def topo_sort(graph: GraphSpec) -> list[str]:
     for nid in node_ids:
         in_degree[nid] = 0
 
-    # count incoming edges for each node
+    # count incoming edges for each node (skip pseudo-endpoints: _input source, _output sink)
     for edge in graph.edges:
-        if edge.from_node == "_input":
+        if edge.from_node == "_input" or edge.to_node == "_output":
             continue
         adj[edge.from_node].append(edge.to_node)
         in_degree[edge.to_node] += 1
@@ -155,6 +155,54 @@ def expand_blocks(graph: GraphSpec) -> GraphSpec:
     return GraphSpec(
         nodes=new_nodes, edges=new_edges, fusion_groups=new_fusion, meta=graph.meta, block=None
     )
+
+
+def _reachable(adj: dict[str, list[str]], start: str) -> set[str]:
+    """DFS reachable set from start over adjacency adj (start itself is not included)."""
+    seen, stack = set(), [start]
+    while stack:
+        for nxt in adj[stack.pop()]:
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return seen
+
+
+def _subgraph(graph: GraphSpec, keep: set[str]) -> GraphSpec:
+    """The subgraph induced by node-id set keep, retaining the pseudo-endpoint edges
+    (_input -> ..., ... -> _output). Fusion groups are kept as-is so a group referencing a pruned
+    node still surfaces in _check_fusion_groups rather than silently vanishing."""
+    nodes = [n for n in graph.nodes if n.id in keep]
+    edges = [
+        e
+        for e in graph.edges
+        if (e.from_node in keep or e.from_node == "_input")
+        and (e.to_node in keep or e.to_node == "_output")
+    ]
+    return GraphSpec(
+        nodes=nodes, edges=edges, fusion_groups=graph.fusion_groups, meta=graph.meta, block=None
+    )
+
+
+def flow_subgraph(graph: GraphSpec) -> GraphSpec:
+    """Nodes on some _input -> _output path (reachable from input AND reaching output); orphan and
+    dead-end nodes are dropped. Idempotent. Assumes blocks are already expanded. Used to gate 'is
+    there a complete path?' and to build only the reachable model."""
+    successors, predecessors = defaultdict(list), defaultdict(list)
+    for e in graph.edges:
+        successors[e.from_node].append(e.to_node)
+        predecessors[e.to_node].append(e.from_node)
+    keep = _reachable(successors, "_input") & _reachable(predecessors, "_output")
+    return _subgraph(graph, keep)
+
+
+def output_cone(graph: GraphSpec) -> GraphSpec:
+    """The subgraph the output depends on: every node that reaches _output, with its incoming
+    edges."""
+    predecessors = defaultdict(list)
+    for e in graph.edges:
+        predecessors[e.to_node].append(e.from_node)
+    return _subgraph(graph, _reachable(predecessors, "_output"))
 
 
 def logical_node_id(nid: str) -> str:

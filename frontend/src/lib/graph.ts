@@ -44,8 +44,9 @@ export function seedToCanvas(): { nodes: Node[]; edges: Edge[] } {
   return { nodes, edges };
 }
 
-// canvas -> GraphRequest. Pseudo-nodes are dropped: the compiler seeds _input (its edges
-// stay valid) and reads logits from lm_head, so edges into _output are dropped too.
+// canvas -> GraphRequest. The _input / _output pseudo-nodes are dropped as nodes, but their edges
+// are kept: _input seeds the graph, _output anchors the sink so validation requires a complete
+// input -> output chain. The compiler treats both as pseudo-endpoints (never built or executed).
 export function canvasToGraph(
   nodes: Node[],
   edges: Edge[],
@@ -60,7 +61,7 @@ export function canvasToGraph(
     });
 
   const schemaEdges: EdgeSchema[] = edges
-    .filter((e) => e.target !== "_output" && !isFusionEdge(e)) // fusion is visual-only
+    .filter((e) => !isFusionEdge(e)) // fusion is visual-only; the _output edge is the sink anchor
     .map((e) => ({
       from_node: e.source,
       to_node: e.target,
@@ -79,8 +80,12 @@ export function graphToCanvas(graph: GraphRequest): { nodes: Node[]; edges: Edge
   const nodes: Node[] = graph.nodes.map((n, i) =>
     rfNode(n.id, n.type, (i % COLS) * 212, Math.floor(i / COLS) * 170, n.quantized ?? null),
   );
+  // _input / _output are pseudo-endpoints: not in graph.nodes, present only as edge endpoints
   if (graph.edges.some((e) => e.from_node === "_input")) {
     nodes.unshift(rfNode("_input", "_input", INPUT_POS.x, INPUT_POS.y));
+  }
+  if (graph.edges.some((e) => e.to_node === "_output")) {
+    nodes.push(rfNode("_output", "_output", OUTPUT_POS.x, OUTPUT_POS.y));
   }
   const edges: Edge[] = graph.edges.map((e) => ({
     id: `${e.from_node}.${e.from_port ?? "out"}->${e.to_node}.${e.to_port ?? "x"}`,
@@ -89,18 +94,6 @@ export function graphToCanvas(graph: GraphRequest): { nodes: Node[]; edges: Edge
     target: e.to_node,
     targetHandle: e.to_port ?? "x",
   }));
-  // the backend graph has no _output; re-attach it visually to the lm_head
-  const lmHead = graph.nodes.find((n) => n.type === "lm_head");
-  if (lmHead) {
-    nodes.push(rfNode("_output", "_output", OUTPUT_POS.x, OUTPUT_POS.y));
-    edges.push({
-      id: `${lmHead.id}.out->_output.logits`,
-      source: lmHead.id,
-      sourceHandle: "out",
-      target: "_output",
-      targetHandle: "logits",
-    });
-  }
   return { nodes, edges };
 }
 

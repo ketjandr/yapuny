@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from server.compiler.fusion_registry import FUSION_BY_PATTERN, FusionDef
 from server.compiler.node_registry import NODE_REGISTRY
+from server.compiler.utils import flow_subgraph, output_cone
 from server.models.graph import GraphSpec
 
 
@@ -39,14 +40,22 @@ class GraphValidator:
         errors: list[str] = []
         warnings: list[str] = []
 
+        # integrity checks apply to everything submitted
         self._check_unknown_types(graph, errors)
-        self._check_required_nodes(graph, errors)
-        self._check_cycles(graph, errors)
         self._check_dangling_edges(graph, errors)
-        self._check_port_connections(graph, errors)
-        self._check_quantization(graph, errors)
-        self._check_fusion_groups(graph, errors)
-        self._check_optional_warnings(graph, warnings)
+
+        # the complete-path gating the input -> output chain (both-ways reachable)
+        self._check_complete_path(flow_subgraph(graph), errors)
+
+        # model checks run on the output cone (nodes that can reach the output node)
+        cone = output_cone(graph)
+        self._check_required_nodes(cone, errors)
+        self._check_cycles(cone, errors)
+        self._check_port_connections(cone, errors)
+        self._check_inputs_satisfied(cone, errors)
+        self._check_quantization(cone, errors)
+        self._check_fusion_groups(cone, errors)
+        self._check_optional_warnings(cone, warnings)
 
         return ValidationResult(errors=errors, warnings=warnings)
 
@@ -74,6 +83,11 @@ class GraphValidator:
         for req in REQUIRED_NODE_TYPES:
             if req not in present:
                 errors.append(f"missing required node: {req}")
+
+    def _check_complete_path(self, flow: GraphSpec, errors: list[str]):
+        # flow holds only the nodes on an _input -> _output path; empty means no such path exists
+        if not flow.nodes:
+            errors.append("no complete path from graph input to output")
 
     def _check_cycles(self, graph: GraphSpec, errors: list[str]):
         # build an adjacency list (unidirectional)
@@ -112,6 +126,7 @@ class GraphValidator:
     def _check_dangling_edges(self, graph: GraphSpec, errors: list[str]):
         node_ids = {n.id for n in graph.nodes}
         node_ids.add("_input")  # pseudo-node for graph inputs (idx, positions)
+        node_ids.add("_output")  # pseudo-node for the graph output (sink)
         for edge in graph.edges:
             if edge.from_node not in node_ids:
                 errors.append(f"edge references nonexistent node: {edge.from_node}")
@@ -146,6 +161,19 @@ class GraphValidator:
                 )
             if edge.to_port not in to_def.inputs:
                 errors.append(f"node {edge.to_node} ({to_type}) has no input port '{edge.to_port}'")
+
+    def _check_inputs_satisfied(self, graph: GraphSpec, errors: list[str]):
+        # every declared input port must be fed; a break in the chain surfaces here as a
+        # downstream node with an unconnected input
+        fed: dict[str, set[str]] = defaultdict(set)
+        for edge in graph.edges:
+            fed[edge.to_node].add(edge.to_port)
+        for node in graph.nodes:
+            if node.type not in NODE_REGISTRY:
+                continue  # unknown type caught by _check_unknown_types
+            for port in NODE_REGISTRY[node.type].inputs:
+                if port not in fed[node.id]:
+                    errors.append(f"node {node.id}: input '{port}' not connected")
 
     def _check_quantization(self, graph: GraphSpec, errors: list[str]):
         from server.compiler.quantization_registry import QUANT_MODES, QUANTIZABLE_NODES
@@ -245,9 +273,9 @@ class GraphValidator:
     def _check_optional_warnings(self, graph: GraphSpec, warnings: list[str]):
         present = {n.type for n in graph.nodes}
         if "causal_mask" not in present:
-            warnings.append("causal mask removed - model sees future tokens (breaks AR)")
+            warnings.append("causal mask removed - model sees future tokens")
         if "layernorm" not in present:
-            warnings.append("no LayerNorm in pipeline - training may destabilize")
+            warnings.append("no layer norm in pipeline - training may destabilize")
 
         # 3 dropouts per block is normal (attn, resid-attn, resid-mlp) + 1 emb
         n_layer = sum(1 for n in graph.nodes if n.type == "qkv_proj")

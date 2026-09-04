@@ -63,3 +63,17 @@ export function structuralIds(nodes: Node[], edges: Edge[]): Map<string, string>
   }
   return out;
 }
+
+const LAYER_PREFIX = /l\d+_/g; // the l{layer}_ prefix the backend adds when unrolling a block
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Rewrite a backend validation message to reference structural ids: strip block-unroll prefixes
+// (so l2_res1 -> res1, the canvas node), then swap each raw node id for its structural id.
+export function humanizeMessage(msg: string, ids: Map<string, string>): string {
+  const logical = msg.replace(LAYER_PREFIX, "");
+  if (ids.size === 0) return logical;
+  // longest id first so a shorter id can't shadow a longer one that contains it
+  const keys = [...ids.keys()].sort((a, b) => b.length - a.length);
+  const re = new RegExp(`\\b(?:${keys.map(escapeRe).join("|")})\\b`, "g");
+  return logical.replace(re, (m) => ids.get(m) ?? m);
+}
