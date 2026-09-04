@@ -1,5 +1,5 @@
 // Node card: catalog-driven geometry, inputs on the left edge, outputs on the right.
-import type { CSSProperties } from "react";
+import { type CSSProperties, useMemo } from "react";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import {
   CATEGORY,
@@ -14,12 +14,18 @@ import {
 } from "@/lib/nodeCatalog";
 import type { YNodeData } from "@/lib/graph";
 import { FUSE_PORT, fusionVisible } from "@/lib/fusion";
+import { useTooltip } from "@/components/tooltipContext";
 import { useCanvasStore } from "@/store/canvasStore";
 
 const VARIANT_CLASS: Record<NodeVariant, string> = {
   req: "",
   io: "io",
 };
+
+// render a description string with `backtick`-wrapped tokens in the mono/formula font
+function renderDesc(text: string) {
+  return text.split("`").map((seg, i) => (i % 2 ? <span key={i} className="tt-mono">{seg}</span> : seg));
+}
 
 export function GraphNode({ id, data, selected }: NodeProps) {
   const { type, quantized } = data as YNodeData;
@@ -31,6 +37,8 @@ export function GraphNode({ id, data, selected }: NodeProps) {
     s.edges.some((e) => e.type === "fusion" && (e.source === id || e.target === id)),
   );
   const def = resolveNodeDef(type);
+  const desc = useMemo(() => (def ? renderDesc(def.description) : ""), [def]);
+  const tip = useTooltip(desc);
   if (!def) {
     return <div className="yn" style={{ padding: 8 }}>?{type}</div>;
   }
@@ -66,7 +74,7 @@ export function GraphNode({ id, data, selected }: NodeProps) {
   if (cat) (style as Record<string, string>)["--accent"] = `var(${cat.accent})`;
 
   return (
-    <div className={cls} style={style}>
+    <div className={cls} style={style} {...tip}>
       <div className="st" />
       {(blockRole === "start" || blockRole === "block") && (
         <span className="yn-bracket start" title="Block start" />
