@@ -1,4 +1,4 @@
-// NodePalette: drag any node type onto the canvas, grouped by category.
+// NodePalette: the Node Registry. Drag any node type onto the canvas, grouped by category.
 import type { CSSProperties } from "react";
 import { DEFAULT_META } from "@/lib/defaultGraph";
 import {
@@ -22,11 +22,13 @@ function onDragStart(e: React.DragEvent, type: string) {
 export function NodePalette() {
   return (
     <>
+      <div className="reg-head">
+        <h3 className="side-eyebrow">Node Registry</h3>
+      </div>
       {ORDER.map((c) => {
         const types = CATALOG_ORDER.filter((t) => CATEGORY_OF[t] === c);
         if (types.length === 0) return null;
-        const style: CSSProperties = {};
-        (style as Record<string, string>)["--accent"] = `var(${CATEGORY[c].accent})`;
+        const style = { "--accent": `var(${CATEGORY[c].accent})` } as CSSProperties;
         return (
           <section className="grp" key={c} style={style}>
             <h3>
@@ -44,9 +46,6 @@ export function NodePalette() {
                     onDragStart={(e) => onDragStart(e, t)}
                     title={resolveSubtitle(def, DEFAULT_META)}
                   >
-                    <span className="m" style={{ color: "var(--accent)" }}>
-                      ▪
-                    </span>
                     {def.label}
                   </div>
                 );

@@ -104,6 +104,24 @@ export function deriveFusionGroups(edges: Edge[]): string[][] {
   return [...groups.values()];
 }
 
+// The kernel a fused group forms (its registry class name), or null if it matches none / the
+// catalog isn't available. Compact, meaningful identity for the group - unlike listing members.
+export function matchFusionKernel(
+  group: string[],
+  typeOf: Map<string, string>,
+  dataEdges: Edge[],
+  catalog: FusionCatalog | undefined,
+): string | null {
+  if (!catalog?.available) return null;
+  const ordered = orderByDataFlow(group, dataEdges);
+  if (!isDataChain(ordered, dataEdges)) return null;
+  const types = ordered.map((id) => typeOf.get(id));
+  const match = catalog.patterns.find(
+    (p) => p.nodes.length === types.length && p.nodes.every((t, i) => t === types[i]),
+  );
+  return match?.kernel ?? null;
+}
+
 // order a group's nodes by their data flow (Kahn); falls back to input order if not a clean chain
 function orderByDataFlow(group: string[], dataEdges: Edge[]): string[] {
   const set = new Set(group);

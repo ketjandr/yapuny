@@ -106,7 +106,108 @@
   flex: 0 0 var(--side-w);
   border-right: 1px solid var(--line);
   background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* registry scrolls (grows with the catalog); the inspector stays pinned below.
+   overscroll-behavior: none kills the rubber-band bounce; scrollbar hidden but scroll kept. */
+.side-reg {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: none;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge */
+}
+.side-reg::-webkit-scrollbar {
+  display: none; /* Safari/Chrome (hides the mac overlay scrollbar) */
+}
+/* fixed height so the split boundary never moves as the selection (node/edge/none) changes */
+.side-insp {
+  flex: 0 0 auto;
+  height: 232px;
+  overflow-y: auto;
+  overscroll-behavior: none;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  border-top: 1px solid var(--line);
+  background: var(--panel2);
+}
+.side-insp::-webkit-scrollbar {
+  display: none;
+}
+/* top-level section header - shared by the sidebar (Node Registry / Node Properties) and the
+   right dock (Config / Training / Generate / Benchmark) so all section titles match. */
+.side-eyebrow {
+  margin: 0;
+  padding: 12px 16px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--txt2);
+  background: var(--bg2);
+  border-bottom: 1px solid var(--hair);
+}
+.side-insp .side-eyebrow {
+  background: var(--panel2);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+/* registry header (eyebrow + search) sticks as one block above the scrolling category list */
+.reg-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--hair);
+}
+.reg-head .side-eyebrow {
+  border-bottom: 0;
+}
+/* inspector body: a key/value list */
+.insp {
+  padding: 13px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.insp.disabled {
+  opacity: 0.4;
+}
+.insp-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.insp-k {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.insp-v {
+  text-align: right;
+  font-size: 11px;
+  color: var(--txt2);
+  overflow-wrap: anywhere;
+}
+.insp-v.mono {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--txt);
+}
+.insp-fam {
+  color: var(--accent, var(--txt2));
+}
+.insp-note {
+  margin: 3px 0 0;
+  font-size: 10px;
+  color: var(--muted);
 }
 .grp {
   border-bottom: 1px solid var(--hair);
@@ -143,13 +244,13 @@
 .pchip {
   font-family: var(--mono);
   font-size: 11.5px;
-  padding: 8px 4px;
+  padding: 8px 4px 8px 12px;
   color: var(--txt2);
   display: flex;
   align-items: center;
-  gap: 10px;
   cursor: grab;
   border-bottom: 1px solid var(--hair);
+  border-left: 2px solid var(--accent, var(--faint)); /* category color rail */
   user-select: none;
 }
 .pchip:last-child {
@@ -160,14 +261,6 @@
 }
 .pchip:active {
   cursor: grabbing;
-}
-.pchip .m {
-  width: 16px;
-  color: var(--faint);
-  font-size: 10px;
-}
-.pchip:hover .m {
-  color: var(--ice);
 }
 
 /* right dock (Config / Training / Generation / Benchmark) */
