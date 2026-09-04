@@ -22,6 +22,7 @@ import { ModeToggle } from "./ModeToggle";
 import { ContextMenu, type CanvasMenu } from "./ContextMenu";
 import { useCanvasShortcuts } from "./useCanvasShortcuts";
 import { ValidationOverlay } from "./ValidationOverlay";
+import { SaveBar, CompileBar } from "./CanvasStatus";
 import { useQuery } from "@tanstack/react-query";
 import { useCanvasStore } from "@/store/canvasStore";
 import { analyzeBlock } from "@/lib/block";
@@ -45,6 +46,9 @@ function CanvasInner() {
   const blockStart = useCanvasStore((s) => s.blockStart);
   const blockEnd = useCanvasStore((s) => s.blockEnd);
   const mode = useCanvasStore((s) => s.mode); // only drives the data-fusion CSS marker below
+  const setViewport = useCanvasStore((s) => s.setViewport);
+  // read the persisted viewport once at mount: restore it via defaultViewport, else fitView
+  const initialViewport = useMemo(() => useCanvasStore.getState().viewport, []);
 
   // cached-per-session fusion catalog; validate fusions locally against it (backend re-checks at
   // compile). Undefined (offline / not fetched) means no flags - optimistic.
@@ -186,8 +190,10 @@ function CanvasInner() {
         selectionMode={SelectionMode.Partial}
         panOnDrag={boxSelect ? [1, 2] : true}
         onSelectionEnd={() => setBoxSelect(false)}
+        onMoveEnd={(_, vp) => setViewport(vp)}
         connectionRadius={34}
-        fitView
+        defaultViewport={initialViewport ?? undefined}
+        fitView={!initialViewport}
         minZoom={0.2}
         proOptions={{ hideAttribution: true }}
       >
@@ -219,6 +225,8 @@ function CanvasInner() {
       </button>
       <ModeToggle />
       <ValidationOverlay />
+      <SaveBar />
+      <CompileBar />
       {menu && <ContextMenu menu={menu} onClose={closeMenu} />}
     </div>
   );

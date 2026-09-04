@@ -9,12 +9,21 @@ import {
   type Node,
   type NodeChange,
   reconnectEdge,
+  type Viewport,
 } from "@xyflow/react";
 import { create } from "zustand";
 import { analyzeBlock } from "@/lib/block";
 import { DEFAULT_META } from "@/lib/defaultGraph";
 import { FUSE_PORT, fusionChainError, isFusionEdge, validateFusionConnect } from "@/lib/fusion";
 import { canvasToGraph, makeEdge, makeFusionEdge, makeNode, seedToCanvas, type YNodeData } from "@/lib/graph";
+import {
+  cleanEdges,
+  cleanNodes,
+  type CompiledSnapshot,
+  loadPersisted,
+  type PersistedCanvas,
+  writePersisted,
+} from "@/lib/persist";
 import type { GraphMetaSchema, GraphRequest } from "@/lib/types";
 import { toast } from "@/store/toastStore";
 
@@ -71,6 +80,10 @@ interface CanvasState {
   mode: CanvasMode;
   selectedId: string | null;
   needsCompile: boolean;
+  trained: boolean; // whether the current compiled graph has been trained (placeholder until wired)
+  lastCompiled: CompiledSnapshot | null; // snapshot taken at compile; target of revertToCompiled
+  viewport: Viewport | null; // persisted pan/zoom, restored on reload
+  saveStatus: "saving" | "saved"; // autosave indicator
   blockStart: string | null; // block boundary markers; the repeated slice is derived from them
   blockEnd: string | null;
   clipboard: Clipboard | null;
@@ -93,7 +106,11 @@ interface CanvasState {
   setNLayer: (n: number) => void;
   setMeta: (patch: Partial<GraphMetaSchema>) => void;
   markCompiled: () => void;
+  markTrained: () => void;
+  revertToCompiled: () => void;
   setMode: (mode: CanvasMode) => void;
+  setViewport: (vp: Viewport) => void;
+  setSaveStatus: (status: "saving" | "saved") => void;
 
   toGraph: () => GraphRequest;
 }
@@ -127,15 +144,22 @@ function edgesAreMeaningful(changes: EdgeChange[]): boolean {
   return changes.some((c) => c.type === "add" || c.type === "remove" || c.type === "replace");
 }
 
+// restore the last session from localStorage, else start from the seed graph
+const persisted = loadPersisted();
+
 export const useCanvasStore = create<CanvasState>((set, get) => ({
-  nodes: seed.nodes,
-  edges: seed.edges,
-  meta: DEFAULT_META,
-  mode: "train", // editing/training is the default view
+  nodes: persisted?.nodes ?? seed.nodes,
+  edges: persisted?.edges ?? seed.edges,
+  meta: persisted?.meta ?? DEFAULT_META,
+  mode: persisted?.mode ?? "train", // editing/training is the default view
   selectedId: null,
-  needsCompile: true, // a fresh (uncompiled) graph needs a compile
-  blockStart: null,
-  blockEnd: null,
+  needsCompile: persisted?.needsCompile ?? true, // a fresh (uncompiled) graph needs a compile
+  trained: persisted?.trained ?? false,
+  lastCompiled: persisted?.lastCompiled ?? null,
+  viewport: persisted?.viewport ?? null,
+  saveStatus: "saved",
+  blockStart: persisted?.blockStart ?? null,
+  blockEnd: persisted?.blockEnd ?? null,
   clipboard: null,
 
   onNodesChange: (changes) =>
@@ -299,8 +323,40 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       return { meta: { ...m, n_head: head, n_embd: embd }, needsCompile: true };
     }),
 
-  markCompiled: () => set({ needsCompile: false }),
+  // compiling clears the dirty flag, snapshots the graph (for revert), and resets trained (a
+  // freshly compiled graph needs (re)training). Local-only for now; backend api.compile wires here.
+  markCompiled: () =>
+    set((s) => ({
+      needsCompile: false,
+      trained: false,
+      lastCompiled: {
+        nodes: cleanNodes(s.nodes),
+        edges: cleanEdges(s.edges),
+        meta: s.meta,
+        blockStart: s.blockStart,
+        blockEnd: s.blockEnd,
+      },
+    })),
+  markTrained: () => set({ trained: true }), // placeholder: flipped by the Train button for now
+  // restore the graph to the last compiled snapshot (discards uncompiled edits)
+  revertToCompiled: () =>
+    set((s) => {
+      const c = s.lastCompiled;
+      if (!c) return {};
+      return {
+        nodes: c.nodes.map((n) => ({ ...n })),
+        edges: c.edges.map((e) => ({ ...e })),
+        meta: c.meta,
+        blockStart: c.blockStart,
+        blockEnd: c.blockEnd,
+        needsCompile: false,
+        trained: false,
+        selectedId: null,
+      };
+    }),
   setMode: (mode) => set({ mode }), // not a graph edit -> no needsCompile
+  setViewport: (viewport) => set({ viewport }), // pan/zoom is cosmetic -> no needsCompile
+  setSaveStatus: (saveStatus) => set({ saveStatus }),
 
   // emit the block only when it is a valid single-in/single-out shape-preserving slice
   toGraph: () => {
@@ -309,3 +365,40 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     return canvasToGraph(s.nodes, s.edges, s.meta, block.valid ? [...block.nodeIds] : undefined);
   },
 }));
+
+// ---- autosave: debounce-persist the graph/view state to localStorage on any meaningful change ----
+// The signature excludes transient flags (selection/drag are normalized out) and non-persisted
+// state (selectedId, clipboard, saveStatus), so selecting a node or flipping the indicator won't
+// trigger a save loop.
+const SAVE_DEBOUNCE_MS = 500;
+
+function persistableOf(s: CanvasState): PersistedCanvas {
+  return {
+    nodes: cleanNodes(s.nodes),
+    edges: cleanEdges(s.edges),
+    meta: s.meta,
+    mode: s.mode,
+    needsCompile: s.needsCompile,
+    trained: s.trained,
+    lastCompiled: s.lastCompiled,
+    viewport: s.viewport,
+    blockStart: s.blockStart,
+    blockEnd: s.blockEnd,
+  };
+}
+
+let lastSig = JSON.stringify(persistableOf(useCanvasStore.getState()));
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+useCanvasStore.subscribe((s) => {
+  const data = persistableOf(s);
+  const sig = JSON.stringify(data);
+  if (sig === lastSig) return; // nothing persistable changed (selection / saveStatus / clipboard)
+  lastSig = sig;
+  if (s.saveStatus !== "saving") useCanvasStore.setState({ saveStatus: "saving" });
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    writePersisted(data);
+    useCanvasStore.setState({ saveStatus: "saved" });
+  }, SAVE_DEBOUNCE_MS);
+});
