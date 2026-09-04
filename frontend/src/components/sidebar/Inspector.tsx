@@ -180,10 +180,14 @@ function EdgeProps({
   mode: CanvasMode;
 }) {
   const fusion = edge.type === "fusion";
-  const srcType = typeOf.get(edge.source);
-  const def = srcType ? resolveNodeDef(srcType) : undefined;
-  const port = def?.outputs.find((p) => p.id === (edge.sourceHandle ?? "out"));
-  const shape = port ? formatShape(port.shape, meta, mode) : null;
+  const srcDef = resolveNodeDef(typeOf.get(edge.source) ?? "");
+  const tgtDef = resolveNodeDef(typeOf.get(edge.target) ?? "");
+  const srcPort = srcDef?.outputs.find((p) => p.id === (edge.sourceHandle ?? "out"));
+  const tgtPort = tgtDef?.inputs.find((p) => p.id === (edge.targetHandle ?? "x"));
+  // show the port's tensor-role label (what the canvas shows), not the raw backend handle id
+  const fromPort = srcPort?.label ?? edge.sourceHandle ?? "out";
+  const toPort = tgtPort?.label ?? edge.targetHandle ?? "x";
+  const shape = srcPort ? formatShape(srcPort.shape, meta, mode) : null;
 
   return (
     <section className="insp-sec">
@@ -191,10 +195,12 @@ function EdgeProps({
       <div className="insp">
         <Row label="Kind">{fusion ? "Fusion stream" : "Tensor edge"}</Row>
         <Row label="From" mono>
-          {friendly(edge.source)} · {edge.sourceHandle ?? "out"}
+          {friendly(edge.source)}
+          {fusion ? "" : ` · ${fromPort}`}
         </Row>
         <Row label="To" mono>
-          {friendly(edge.target)} · {edge.targetHandle ?? "in"}
+          {friendly(edge.target)}
+          {fusion ? "" : ` · ${toPort}`}
         </Row>
         {!fusion && shape && (
           <Row label="Shape" mono>
