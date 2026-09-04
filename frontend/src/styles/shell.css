@@ -1,4 +1,4 @@
-/* App shell: nav, sidebar + palette, right dock. */
+/* App shell: nav + body (left pane, canvas, right pane). Pane shells live in panes.css. */
 .app {
   display: flex;
   flex-direction: column;
@@ -100,45 +100,10 @@
   min-height: 0;
 }
 
-/* sidebar */
-.side {
-  width: var(--side-w);
-  flex: 0 0 var(--side-w);
-  border-right: 1px solid var(--line);
-  background: var(--bg2);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-/* registry scrolls (grows with the catalog); the inspector stays pinned below.
-   overscroll-behavior: none kills the rubber-band bounce; scrollbar hidden but scroll kept. */
-.side-reg {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: none;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* old Edge */
-}
-.side-reg::-webkit-scrollbar {
-  display: none; /* Safari/Chrome (hides the mac overlay scrollbar) */
-}
-/* fixed height so the split boundary never moves as the selection (node/edge/none) changes */
-.side-insp {
-  flex: 0 0 auto;
-  height: 232px;
-  overflow-y: auto;
-  overscroll-behavior: none;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  border-top: 1px solid var(--line);
-  background: var(--panel2);
-}
-.side-insp::-webkit-scrollbar {
-  display: none;
-}
-/* top-level section header - shared by the sidebar (Node Registry / Node Properties) and the
-   right dock (Config / Training / Generate / Benchmark) so all section titles match. */
+/* sidebar shell (.pane.left) + collapse handle + registry/inspector split now live in panes.css */
+
+/* top-level section header - shared by the left pane (Node Registry / Node Properties) and the
+   right pane (Config / Training / Generate / Benchmark) so all section titles match. */
 .side-eyebrow {
   margin: 0;
   padding: 12px 16px;
@@ -149,12 +114,6 @@
   color: var(--txt2);
   background: var(--bg2);
   border-bottom: 1px solid var(--hair);
-}
-.side-insp .side-eyebrow {
-  background: var(--panel2);
-  position: sticky;
-  top: 0;
-  z-index: 2;
 }
 /* registry header (eyebrow + search) sticks as one block above the scrolling category list */
 .reg-head {
@@ -218,7 +177,7 @@
   font-size: 10px;
   letter-spacing: 0.1em; /* eased so long titles (Multilayer Perceptron) fit the rail */
   text-transform: uppercase;
-  color: var(--faint);
+  color: var(--muted); /* shared subheading color (both panes); readable gray, below the top header */
   font-weight: 600;
   display: flex;
   gap: 8px;
@@ -263,14 +222,6 @@
   cursor: grabbing;
 }
 
-/* right dock (Config / Training / Generation / Benchmark) */
-.dock {
-  width: var(--dock-w);
-  flex: 0 0 var(--dock-w);
-  border-left: 1px solid var(--line);
-  background: var(--bg2);
-  overflow-y: auto;
-}
 
 /* reusable tooltip (components/Tooltip.tsx): instant, dark, anchored above the target. left/top
    are set imperatively each frame; the transform lifts it above and centers it (fixed size). */

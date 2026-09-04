@@ -1,13 +1,10 @@
-// App shell: nav + (sidebar, canvas, right dock).
+// App shell: nav + (left pane, canvas, right pane).
 import { Navbar } from "@/components/Navbar";
 import { Canvas } from "@/components/canvas/Canvas";
-import { Sidebar } from "@/components/sidebar/Sidebar";
+import { LeftPane } from "@/components/panes/LeftPane";
 import { ToastContainer } from "@/components/Toast";
 import { TooltipLayer } from "@/components/Tooltip";
-import { ConfigPanel } from "@/components/panels/ConfigPanel";
-import { TrainingPanel } from "@/components/panels/TrainingPanel";
-import { GenerationPanel } from "@/components/panels/GenerationPanel";
-import { BenchmarkPanel } from "@/components/panels/BenchmarkPanel";
+import { RightPane } from "@/components/panes/RightPane";
 
 export default function App() {
   return (
@@ -15,14 +12,9 @@ export default function App() {
       <div className="app">
         <Navbar />
         <div className="body">
-          <Sidebar />
+          <LeftPane />
           <Canvas />
-          <aside className="dock">
-            <ConfigPanel />
-            <TrainingPanel />
-            <GenerationPanel />
-            <BenchmarkPanel />
-          </aside>
+          <RightPane />
         </div>
         <ToastContainer />
       </div>

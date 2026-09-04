@@ -20,6 +20,9 @@ import { toast } from "@/store/toastStore";
 
 const seed = seedToCanvas();
 
+export const N_LAYER_MIN = 1;
+export const N_LAYER_MAX = 16; // block loop count bound; shared by the config slider + block stepper
+
 // View mode; the hook point for mode-specific rendering (grey kv_cache, T/S, fusion/quant).
 export type CanvasMode = "train" | "inference";
 
@@ -88,6 +91,7 @@ interface CanvasState {
   setBlockEnd: (id: string | null) => void;
   clearBlock: () => void;
   setNLayer: (n: number) => void;
+  setMeta: (patch: Partial<GraphMetaSchema>) => void;
   markCompiled: () => void;
   setMode: (mode: CanvasMode) => void;
 
@@ -279,7 +283,21 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setBlockEnd: (id) => set({ blockEnd: id, needsCompile: true }),
   clearBlock: () => set({ blockStart: null, blockEnd: null, needsCompile: true }),
   // loop count; also structural (changes the unrolled depth)
-  setNLayer: (n) => set((s) => ({ meta: { ...s.meta, n_layer: Math.max(1, n) }, needsCompile: true })),
+  setNLayer: (n) =>
+    set((s) => ({
+      meta: { ...s.meta, n_layer: Math.min(N_LAYER_MAX, Math.max(N_LAYER_MIN, n)) },
+      needsCompile: true,
+    })),
+
+  // merge a config patch; smart constraint: n_embd is snapped to a multiple of n_head so the
+  // per-head dim stays an integer. Config changes are structural -> needsCompile.
+  setMeta: (patch) =>
+    set((s) => {
+      const m = { ...s.meta, ...patch };
+      const head = Math.max(1, Math.round(m.n_head));
+      const embd = Math.max(head, Math.round(m.n_embd / head) * head);
+      return { meta: { ...m, n_head: head, n_embd: embd }, needsCompile: true };
+    }),
 
   markCompiled: () => set({ needsCompile: false }),
   setMode: (mode) => set({ mode }), // not a graph edit -> no needsCompile

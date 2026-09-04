@@ -5,7 +5,7 @@ import { ViewportPortal } from "@xyflow/react";
 import { analyzeBlock } from "@/lib/block";
 import type { YNodeData } from "@/lib/graph";
 import { nodeHeight, nodeWidth, resolveNodeDef } from "@/lib/nodeCatalog";
-import { useCanvasStore } from "@/store/canvasStore";
+import { N_LAYER_MAX, N_LAYER_MIN, useCanvasStore } from "@/store/canvasStore";
 
 const PAD = 26; // flow px of breathing room between the nodes and the box
 
@@ -64,11 +64,21 @@ export function BlockWrapper() {
         <div className="block-head" ref={headRef}>
           <span className="block-title">Block</span>
           <span className="block-x">
-            <button type="button" aria-label="Fewer layers" onClick={() => setNLayer(meta.n_layer - 1)}>
+            <button
+              type="button"
+              aria-label="Fewer layers"
+              disabled={meta.n_layer <= N_LAYER_MIN}
+              onClick={() => setNLayer(meta.n_layer - 1)}
+            >
               &minus;
             </button>
             <span className="block-count">&times;{meta.n_layer}</span>
-            <button type="button" aria-label="More layers" onClick={() => setNLayer(meta.n_layer + 1)}>
+            <button
+              type="button"
+              aria-label="More layers"
+              disabled={meta.n_layer >= N_LAYER_MAX}
+              onClick={() => setNLayer(meta.n_layer + 1)}
+            >
               +
             </button>
           </span>

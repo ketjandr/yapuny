@@ -28,7 +28,7 @@ import { analyzeBlock } from "@/lib/block";
 import { api } from "@/lib/api";
 import { FUSE_PORT, type FusionCatalog, fusionVisible, validateFusion } from "@/lib/fusion";
 import type { YNodeData } from "@/lib/graph";
-import { PALETTE_MIME } from "@/components/sidebar/NodePalette";
+import { PALETTE_MIME } from "@/components/panes/NodePalette";
 
 const nodeTypes = { graph: GraphNode };
 const edgeTypes = { default: SmoothEdge, fusion: FusionEdge };

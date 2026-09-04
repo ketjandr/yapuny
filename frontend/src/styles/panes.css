@@ -1,0 +1,455 @@
+/* Side panes (left + right): a shared collapsible shell (.pane + .left/.right), the left pane's
+   registry/inspector split, and the right pane's content sections. The shell markup lives in
+   components/panes/PaneShell.tsx; LeftPane/RightPane supply the body. */
+
+/* ============================ shared shell ============================ */
+.pane {
+  position: relative; /* anchor for the edge handle */
+  display: flex;
+  flex-direction: column;
+  background: var(--bg2);
+  overflow: visible; /* let the handle protrude past the inner edge */
+}
+.pane.left {
+  width: var(--side-w);
+  flex: 0 0 var(--side-w);
+  border-right: 1px solid var(--line);
+  z-index: 5; /* the left pane precedes the canvas in the DOM; lift its handle above it */
+}
+.pane.right {
+  width: var(--dock-w);
+  flex: 0 0 var(--dock-w);
+  border-left: 1px solid var(--line);
+}
+
+/* header (title + optional full-view toggle) */
+.pane-head {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--hair);
+}
+.pane-title {
+  flex: 1;
+  border-bottom: 0;
+}
+.pane-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
+}
+.pane-icon {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--txt2); /* whiter glyph, on-theme */
+  background: var(--line2); /* light-grey chip, on-theme */
+  border: 1px solid var(--line3); /* thin, all-sides (the UA bevel is reset in base.css) */
+  border-radius: 4px;
+}
+.pane-icon:hover {
+  color: var(--txt); /* hover lights up only the glyph (border/background stay put) */
+}
+/* full-view close (✕): red background; border stays the same grey (--line3) as expand */
+.pane-icon.close {
+  background: color-mix(in srgb, var(--red) 22%, transparent);
+}
+
+/* scroll body (used by the right pane; the left pane splits into reg + insp instead) */
+.pane-body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: none;
+  scrollbar-width: none;
+}
+.pane-body::-webkit-scrollbar {
+  display: none;
+}
+
+/* collapse/expand handle: a tab on the pane's inner edge, vertically centered. Blends with the
+   panel (same ground + hairline, merged into its border) but is noticeable via the chevron. */
+.pane-handle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--txt2);
+  cursor: pointer;
+  background: var(--bg2);
+  border: 1px solid var(--line); /* same as the panel border */
+}
+.pane-handle:hover {
+  color: var(--txt);
+  background: var(--panel);
+  border-color: var(--muted); /* whiter on hover */
+}
+/* right pane: handle on the LEFT edge (toward the canvas) */
+.pane-handle.right {
+  left: -18px;
+  border-right: 0;
+  border-radius: 7px 0 0 7px;
+}
+/* left pane: handle on the RIGHT edge (toward the canvas) */
+.pane-handle.left {
+  right: -18px;
+  border-left: 0;
+  border-radius: 0 7px 7px 0;
+}
+/* tall, slim chevron */
+.pane-chev {
+  display: inline-block;
+  font-size: 15px;
+  transform: scaleY(1.7);
+}
+/* collapsed: the reopen tab floats on the matching screen edge (on top) */
+.pane-handle.reopen {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+}
+.pane-handle.reopen.right {
+  left: auto;
+  right: 0;
+}
+.pane-handle.reopen.left {
+  right: auto;
+  left: 0;
+}
+
+/* full-view overlay (opt-in; right pane) */
+.pane-full {
+  position: fixed;
+  inset: calc(var(--nav-h) + 14px) 14px 14px 14px;
+  z-index: 200;
+  display: flex;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 10px;
+}
+.pane-full-inner {
+  width: min(780px, 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 34px 90px -34px #000;
+}
+.pane-full .pane-body {
+  padding-bottom: 8px;
+}
+
+/* ============================ left pane content ============================ */
+/* registry scrolls (grows with the catalog); the inspector stays pinned below.
+   overscroll-behavior: none kills the rubber-band bounce; scrollbar hidden but scroll kept. */
+.pane-reg {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: none;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge */
+}
+.pane-reg::-webkit-scrollbar {
+  display: none; /* Safari/Chrome (hides the mac overlay scrollbar) */
+}
+/* fixed height so the split boundary never moves as the selection (node/edge/none) changes */
+.pane-insp {
+  flex: 0 0 auto;
+  height: 232px;
+  overflow-y: auto;
+  overscroll-behavior: none;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  border-top: 1px solid var(--line);
+  background: var(--panel2);
+}
+.pane-insp::-webkit-scrollbar {
+  display: none;
+}
+.pane-insp .side-eyebrow {
+  background: var(--panel2);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* ============================ right pane content ============================ */
+/* section body: a flex column of controls (outer padding comes from the .grp section wrapper,
+   shared with the left pane so both panes' titled sections match) */
+.pan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* config sliders */
+.cfg {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* full view: 2 columns x 3 rows */
+.cfg.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 22px;
+}
+.cfg-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cfg-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cfg-k {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--txt2);
+}
+.cfg-hint {
+  font-size: 8.5px;
+  color: var(--faint);
+}
+.cfg-num {
+  width: 66px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--txt);
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 3px 6px;
+  outline: none;
+}
+.cfg-num:focus {
+  border-color: var(--line3);
+}
+.cfg-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line2);
+  cursor: pointer;
+}
+.cfg-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ice);
+  border: 2px solid var(--bg2);
+  cursor: pointer;
+}
+.cfg-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--bg2);
+  border-radius: 50%;
+  background: var(--ice);
+  cursor: pointer;
+}
+
+/* stat tiles */
+.stat-row {
+  display: flex;
+  gap: 8px;
+}
+.stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.stat-v {
+  font-size: 14px;
+  color: var(--txt);
+}
+.stat-k {
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+}
+
+/* hyperparameter inputs */
+.hp-row {
+  display: flex;
+  gap: 8px;
+}
+.hp {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hp-k {
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+}
+.hp-in {
+  width: 100%;
+  font-size: 11px;
+  color: var(--txt);
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 5px 7px;
+  outline: none;
+}
+.hp-in:focus {
+  border-color: var(--line3);
+}
+
+/* buttons */
+.btn {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 8px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--line2);
+  color: var(--txt2);
+  background: var(--panel);
+}
+.btn:hover {
+  border-color: var(--line3);
+  color: var(--txt);
+}
+.btn.primary {
+  background: var(--ice-dim);
+  border-color: var(--ice-dim);
+  color: var(--txt);
+}
+.btn.primary:hover {
+  background: var(--ice);
+  color: #04121a;
+}
+
+/* benchmark toggle switch (sits in the section subheading, shows/hides the body) */
+.sw {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--line2);
+  border-radius: 999px;
+  background: var(--panel);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+.sw:hover {
+  border-color: var(--line3);
+}
+.sw-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
+}
+.sw.on {
+  background: var(--ice-dim);
+  border-color: var(--ice-dim);
+}
+.sw.on .sw-knob {
+  transform: translateX(12px);
+  background: var(--ice);
+}
+
+/* loss graph placeholder */
+.loss-graph {
+  width: 100%;
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+/* generate */
+.gen-prompt {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--txt);
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  padding: 8px;
+  outline: none;
+}
+.gen-prompt:focus {
+  border-color: var(--line3);
+}
+.gen-output {
+  min-height: 84px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
+/* per-node benchmark bars */
+.bench-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.bench-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bb-label {
+  flex: 0 0 84px;
+  font-size: 10px;
+  color: var(--txt2);
+}
+.bb-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+.bb-fill {
+  display: block;
+  height: 100%;
+  background: var(--ice);
+}

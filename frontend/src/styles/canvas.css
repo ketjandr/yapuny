@@ -335,9 +335,13 @@
   border-radius: 4px;
   cursor: pointer;
 }
-.block-x button:hover {
+.block-x button:hover:not(:disabled) {
   color: var(--txt);
   border-color: var(--line3);
+}
+.block-x button:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 .block-err {
   position: absolute;
