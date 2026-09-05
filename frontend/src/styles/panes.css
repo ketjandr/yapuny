@@ -39,6 +39,7 @@
   gap: 2px;
   padding-right: 8px;
 }
+/* matches the canvas tool buttons (box-select / revert): translucent chip, muted glyph -> txt2 */
 .pane-icon {
   width: 26px;
   height: 26px;
@@ -46,17 +47,22 @@
   align-items: center;
   justify-content: center;
   font-size: 14px;
-  color: var(--txt2); /* whiter glyph, on-theme */
-  background: var(--line2); /* light-grey chip, on-theme */
-  border: 1px solid var(--line3); /* thin, all-sides (the UA bevel is reset in base.css) */
-  border-radius: 4px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  border: 1px solid var(--line2);
+  border-radius: 7px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 26px -14px #000;
+  cursor: pointer;
 }
 .pane-icon:hover {
-  color: var(--txt); /* hover lights up only the glyph (border/background stay put) */
+  color: var(--txt2);
 }
-/* full-view close (✕): red background; border stays the same grey (--line3) as expand */
-.pane-icon.close {
-  background: color-mix(in srgb, var(--red) 22%, transparent);
+/* full-view close (✕): reveals red on hover to signal exit (neutral chip at rest, like the rest) */
+.pane-icon.close:hover {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, var(--line2));
+  background: color-mix(in srgb, var(--red) 14%, var(--panel));
 }
 
 /* scroll body (used by the right pane; the left pane splits into reg + insp instead) */

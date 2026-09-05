@@ -2,7 +2,6 @@
 import { BaseEdge, getBezierPath, useNodes, type EdgeProps, type Node } from "@xyflow/react";
 import { nodeHeight, resolveNodeDef } from "@/lib/nodeCatalog";
 import type { YNodeData } from "@/lib/graph";
-import { useCanvasStore } from "@/store/canvasStore";
 
 const BASE_CLEAR = 38; // min lift over the obstacle row
 const LIFT_PER_PX = 0.17; // longer skips arch higher
@@ -57,16 +56,6 @@ export function SmoothEdge(props: EdgeProps) {
     style,
   } = props;
   const nodes = useNodes();
-  const mode = useCanvasStore((s) => s.mode);
-
-  // grey edges touching a node that's inactive in this mode (e.g. kv_cache while training)
-  const dimmed =
-    mode === "train" &&
-    nodes.some(
-      (n) =>
-        (n.id === source || n.id === target) &&
-        resolveNodeDef((n.data as YNodeData)?.type)?.trainingNoop,
-    );
 
   let path: string;
   const rects = nodes.filter((n) => n.id !== source && n.id !== target).map(rectOf);
@@ -97,7 +86,7 @@ export function SmoothEdge(props: EdgeProps) {
       id={id}
       path={path}
       markerEnd={markerEnd}
-      style={dimmed ? { ...style, opacity: 0.28 } : style}
+      style={style}
     />
   );
 }

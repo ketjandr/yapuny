@@ -126,6 +126,45 @@
   color: var(--faint);
   cursor: default;
 }
+/* node action row: 3 equal parts (quantize + block start/end), each an icon toggle */
+.ctx-icons {
+  display: flex;
+  gap: 4px;
+  margin-top: 3px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line2);
+}
+.ctx-icon {
+  flex: 1; /* divide the row into equal parts */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  color: var(--muted);
+  background: var(--panel2);
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.ctx-icon:hover:not(:disabled) {
+  color: var(--txt2);
+  border-color: var(--muted);
+}
+.ctx-icon.on {
+  color: var(--txt);
+  border-color: var(--txt2);
+  background: color-mix(in srgb, var(--txt2) 12%, var(--panel));
+}
+.ctx-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ctx-icon-mode {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
 
 /* React Flow theming */
 .react-flow {

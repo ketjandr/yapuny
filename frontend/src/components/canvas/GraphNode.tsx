@@ -55,7 +55,9 @@ export function GraphNode({ id, data, selected }: NodeProps) {
 
   const w = nodeWidth(def, meta);
   const h = nodeHeight(def);
-  const dimmed = mode === "train" && !!def.trainingNoop; // inactive while training
+  // inactive in the current mode: kv_cache does nothing in train, dropout nothing at inference
+  const dimmed =
+    (mode === "train" && !!def.trainingNoop) || (mode === "inference" && !!def.inferenceNoop);
   const cat = CATEGORY_OF[type] ? CATEGORY[CATEGORY_OF[type]] : null; // family color + badge
   // quantization is inference-only (like fusion), so its styling/badge only show in inference mode
   const showQuant = !!quantized && fusionVisible(mode);

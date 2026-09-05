@@ -21,6 +21,7 @@ export function PaneShell({ side, title, expanded = false, onToggleExpand, child
   const [collapsed, setCollapsed] = useState(false);
   const collapseTip = useTooltip("Collapse view");
   const expandTip = useTooltip("Expand view");
+  const fullViewTip = useTooltip(expanded ? "Exit full view" : "Full view");
   const expandable = onToggleExpand != null;
 
   // chevrons point the way the pane travels: left tucks left («) / reopens right (»); right mirrors
@@ -49,8 +50,9 @@ export function PaneShell({ side, title, expanded = false, onToggleExpand, child
           <button
             type="button"
             className={`pane-icon${expanded ? " close" : ""}`}
-            title={expanded ? "Exit full view" : "Full view"}
+            aria-label={expanded ? "Exit full view" : "Full view"}
             onClick={() => onToggleExpand?.()}
+            {...fullViewTip}
           >
             {expanded ? "✕" : "⤢"}
           </button>

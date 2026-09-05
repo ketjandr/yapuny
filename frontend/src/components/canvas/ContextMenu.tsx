@@ -1,5 +1,11 @@
-// Right-click menu for the canvas: node (copy/delete/block markers), edge (delete), pane (paste).
+// Right-click menu for the canvas: node (copy/delete + quant/block action row), edge (delete),
+// pane (paste).
 import { useReactFlow } from "@xyflow/react";
+import { BracketIcon, QuantIcon } from "@/components/nodeActionIcons";
+import { useTooltip } from "@/components/tooltipContext";
+import type { YNodeData } from "@/lib/graph";
+import { resolveNodeDef } from "@/lib/nodeCatalog";
+import { nextQuant } from "@/lib/quant";
 import { useCanvasStore } from "@/store/canvasStore";
 
 export interface CanvasMenu {
@@ -24,8 +30,6 @@ export function ContextMenu({ menu, onClose }: { menu: CanvasMenu; onClose: () =
   const removeNodes = useCanvasStore((s) => s.removeNodes);
   const removeEdges = useCanvasStore((s) => s.removeEdges);
   const paste = useCanvasStore((s) => s.paste);
-  const setBlockStart = useCanvasStore((s) => s.setBlockStart);
-  const setBlockEnd = useCanvasStore((s) => s.setBlockEnd);
 
   const run = (fn: () => void) => {
     fn();
@@ -48,9 +52,6 @@ export function ContextMenu({ menu, onClose }: { menu: CanvasMenu; onClose: () =
     items = [
       { label: `Copy ${noun}`, onClick: () => run(() => copyNodes(ids, selectedEdges)) },
       { label: `Delete ${noun}`, onClick: () => run(() => removeNodes(ids)) },
-      // a block boundary is a single node, so disable when multiple are selected
-      { label: "Set as block start", disabled: multi, onClick: () => run(() => setBlockStart(menu.id!)) },
-      { label: "Set as block end", disabled: multi, onClick: () => run(() => setBlockEnd(menu.id!)) },
     ];
   } else if (menu.kind === "edge" && menu.id) {
     const ids = targets(
@@ -93,7 +94,71 @@ export function ContextMenu({ menu, onClose }: { menu: CanvasMenu; onClose: () =
             {it.label}
           </button>
         ))}
+        {menu.kind === "node" && menu.id && (
+          <NodeActions
+            nodeId={menu.id}
+            multi={targets(menu.id, nodes.filter((n) => n.selected).map((n) => n.id)).length > 1}
+          />
+        )}
       </div>
     </>
+  );
+}
+
+// quant + block-start/block-end toggles for a node, laid out as a 3-part icon row. Toggling leaves
+// the menu open (so several can be set at once); a block boundary is single-node, disabled on multi.
+function NodeActions({ nodeId, multi }: { nodeId: string; multi: boolean }) {
+  const nodes = useCanvasStore((s) => s.nodes);
+  const mode = useCanvasStore((s) => s.mode);
+  const blockStart = useCanvasStore((s) => s.blockStart);
+  const blockEnd = useCanvasStore((s) => s.blockEnd);
+  const setQuantized = useCanvasStore((s) => s.setQuantized);
+  const setBlockStart = useCanvasStore((s) => s.setBlockStart);
+  const setBlockEnd = useCanvasStore((s) => s.setBlockEnd);
+
+  const d = nodes.find((n) => n.id === nodeId)?.data as YNodeData | undefined;
+  const def = resolveNodeDef(d?.type ?? "");
+  const quantizable = (def?.quantizable ?? false) && mode === "inference";
+  const isStart = nodeId === blockStart;
+  const isEnd = nodeId === blockEnd;
+
+  const quantTip = useTooltip("Quantize weights (W8 / W4)");
+  const startTip = useTooltip(isStart ? "Clear block start" : "Set as block start");
+  const endTip = useTooltip(isEnd ? "Clear block end" : "Set as block end");
+
+  return (
+    <div className="ctx-icons">
+      {quantizable && (
+        <button
+          type="button"
+          className={`ctx-icon${d?.quantized ? " on" : ""}`}
+          onClick={() => setQuantized(nodeId, nextQuant(d?.quantized ?? null))}
+          aria-label="Quantize weights"
+          {...quantTip}
+        >
+          {d?.quantized ? <span className="ctx-icon-mode">{d.quantized.toUpperCase()}</span> : <QuantIcon />}
+        </button>
+      )}
+      <button
+        type="button"
+        className={`ctx-icon${isStart ? " on" : ""}`}
+        disabled={multi}
+        onClick={() => setBlockStart(isStart ? null : nodeId)}
+        aria-label="Set as block start"
+        {...startTip}
+      >
+        <BracketIcon side="start" />
+      </button>
+      <button
+        type="button"
+        className={`ctx-icon${isEnd ? " on" : ""}`}
+        disabled={multi}
+        onClick={() => setBlockEnd(isEnd ? null : nodeId)}
+        aria-label="Set as block end"
+        {...endTip}
+      >
+        <BracketIcon side="end" />
+      </button>
+    </div>
   );
 }

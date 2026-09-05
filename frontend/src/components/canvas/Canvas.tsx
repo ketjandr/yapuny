@@ -30,7 +30,8 @@ import { analyzeBlock } from "@/lib/block";
 import { api } from "@/lib/api";
 import { FUSE_PORT, type FusionCatalog, fusionVisible, validateFusion } from "@/lib/fusion";
 import type { YNodeData } from "@/lib/graph";
-import { PALETTE_MIME } from "@/components/panes/NodePalette";
+import { nodeHeight, nodeWidth, resolveNodeDef } from "@/lib/nodeCatalog";
+import { draggingType, PALETTE_MIME } from "@/components/panes/NodePalette";
 
 const nodeTypes = { graph: GraphNode };
 const edgeTypes = { default: SmoothEdge, fusion: FusionEdge };
@@ -47,6 +48,7 @@ function CanvasInner() {
   const blockStart = useCanvasStore((s) => s.blockStart);
   const blockEnd = useCanvasStore((s) => s.blockEnd);
   const mode = useCanvasStore((s) => s.mode); // only drives the data-fusion CSS marker below
+  const meta = useCanvasStore((s) => s.meta); // node geometry (width) depends on it, for the preview
   const setViewport = useCanvasStore((s) => s.setViewport);
   // read the persisted viewport once at mount: restore it via defaultViewport, else fitView
   const initialViewport = useMemo(() => useCanvasStore.getState().viewport, []);
@@ -95,6 +97,9 @@ function CanvasInner() {
     });
   }, [nodes, edges, blockStart, blockEnd, fusion]);
 
+  // live preview of the node being dragged from the registry, in flow coords (null = not dragging)
+  const [preview, setPreview] = useState<{ type: string; x: number; y: number } | null>(null);
+
   // flag red: nodes in an invalid fusion group, and quantized nodes the worker can't quantize
   const displayNodes = useMemo(() => {
     if (fusion.badNodes.size === 0 && quantBad.size === 0) return nodes;
@@ -107,6 +112,30 @@ function CanvasInner() {
     });
   }, [nodes, fusion, quantBad]);
 
+  // append the drag-preview node so the registry node visibly materializes at the drop point;
+  // it is inert (not selectable/draggable) and marked .ghost so it reads as tentative
+  const renderNodes = useMemo(() => {
+    if (!preview) return displayNodes;
+    const def = resolveNodeDef(preview.type);
+    // explicit width/height + measured so React Flow paints it immediately: without measured, a
+    // node freshly injected each dragover frame stays visibility:hidden pending measurement
+    const w = def ? nodeWidth(def, meta) : 150;
+    const h = def ? nodeHeight(def) : 60;
+    const ghost: Node = {
+      id: "__preview__",
+      type: "graph",
+      position: { x: preview.x, y: preview.y },
+      data: { type: preview.type, quantized: null } satisfies YNodeData,
+      width: w,
+      height: h,
+      measured: { width: w, height: h },
+      selectable: false,
+      draggable: false,
+      className: "ghost",
+    };
+    return [...displayNodes, ghost];
+  }, [displayNodes, preview, meta]);
+
   const { screenToFlowPosition } = useReactFlow();
   useCanvasShortcuts();
 
@@ -115,14 +144,28 @@ function CanvasInner() {
     return (c.sourceHandle === FUSE_PORT) === (c.targetHandle === FUSE_PORT);
   }, []);
 
-  const onDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
+  const onDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const type = draggingType();
+      if (!type) return;
+      const { x, y } = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      setPreview({ type, x, y });
+    },
+    [screenToFlowPosition],
+  );
+
+  // dragging back out of the canvas cancels the placement; ignore leaves into descendant elements
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) return;
+    setPreview(null);
   }, []);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      setPreview(null);
       const type = e.dataTransfer.getData(PALETTE_MIME);
       if (!type) return;
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
@@ -153,7 +196,13 @@ function CanvasInner() {
   }, []);
 
   return (
-    <div className="cv" data-fusion={fusionVisible(mode) ? "on" : "off"} onDrop={onDrop} onDragOver={onDragOver}>
+    <div
+      className="cv"
+      data-fusion={fusionVisible(mode) ? "on" : "off"}
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+    >
       {/* shared filter: static turbulence displacement gives the fused-node border its wispy,
           crackling edge (computed once - motion elsewhere is cheap CSS, not an animated filter) */}
       <svg className="fusion-defs" aria-hidden="true">
@@ -193,7 +242,7 @@ function CanvasInner() {
       <ReactFlow
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        nodes={displayNodes}
+        nodes={renderNodes}
         edges={displayEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}

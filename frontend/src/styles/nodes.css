@@ -19,6 +19,14 @@
   opacity: 0.34;
   transition: opacity 0.15s ease;
 }
+/* ghost: the live drag-preview node, tentative until dropped and inert to the pointer */
+.react-flow__node.ghost {
+  opacity: 0.85;
+  pointer-events: none;
+}
+.react-flow__node.ghost .yn {
+  box-shadow: 0 0 0 1.5px var(--accent, var(--txt)), 0 14px 30px -16px #000;
+}
 .yn .st {
   position: absolute;
   left: -1px;

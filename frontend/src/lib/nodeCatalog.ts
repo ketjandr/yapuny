@@ -64,6 +64,21 @@ export function formatShape(shape: Axis[], meta: GraphMetaSchema, mode: ShapeMod
   return `(${shape.map((a) => resolveAxis(a, meta, mode)).join(", ")})`;
 }
 
+// bare symbolic axes for a message, e.g. ["H","T","hd"] -> "(H, T, hd)"
+export function shapeAxes(shape: Axis[]): string {
+  return `(${shape.join(", ")})`;
+}
+
+// Two ports are shape-compatible if they have the same rank and matching axes. T and S (both the
+// sequence length) are interchangeable: a kv_cache only changes the length (S = past + T), and
+// without one T = S - so connecting e.g. qkv.k (H,T,hd) straight into attention_score.k (H,S,hd)
+// is valid.
+export function shapesCompatible(a: Axis[], b: Axis[]): boolean {
+  if (a.length !== b.length) return false;
+  const seq = (x: Axis) => x === "T" || x === "S";
+  return a.every((ax, i) => ax === b[i] || (seq(ax) && seq(b[i])));
+}
+
 export interface PortDef {
   id: string; // the backend port name (edge from_port / to_port)
   label: string; // short role label shown at the handle
@@ -81,6 +96,7 @@ export interface NodeDef {
   fusable: boolean; // appears in a fusion pattern -> shows the bottom fusion port
   quantizable: boolean; // has an nn.Linear the backend can quantize -> W8/W4 allowed
   trainingNoop?: boolean; // does nothing during training (e.g. kv_cache) -> greyed in train mode
+  inferenceNoop?: boolean; // does nothing at inference (e.g. dropout) -> greyed in inference mode
 }
 
 const p = (id: string, shape: Axis[], label = id): PortDef => ({ id, label, shape });
@@ -237,6 +253,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
     outputs: [p("out", ["T", "C"])],
     fusable: true,
     quantizable: false,
+    inferenceNoop: true, // disabled at eval -> greyed in inference mode (mirrors kv_cache in train)
   },
   mlp_up: {
     type: "mlp_up",

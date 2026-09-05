@@ -17,6 +17,7 @@ import { analyzeBlock } from "@/lib/block";
 import { DEFAULT_META } from "@/lib/defaultGraph";
 import { FUSE_PORT, fusionChainError, isFusionEdge, validateFusionConnect } from "@/lib/fusion";
 import { blankToCanvas, canvasToGraph, makeEdge, makeFusionEdge, makeNode, type YNodeData } from "@/lib/graph";
+import { resolveNodeDef, shapeAxes, shapesCompatible } from "@/lib/nodeCatalog";
 import {
   cleanEdges,
   cleanNodes,
@@ -137,6 +138,25 @@ function rejectIfOccupied(edges: Edge[], conn: Connection, exceptId?: string): b
   return false;
 }
 
+// shape guard: the source output port and target input port must be shape-compatible (T/S seq axis
+// treated as interchangeable). Toasts and returns true on a mismatch; skips unknown/pseudo ports.
+function rejectIfShapeMismatch(nodes: Node[], conn: Connection): boolean {
+  const typeOf = (id: string | null | undefined) =>
+    (nodes.find((n) => n.id === id)?.data as YNodeData | undefined)?.type;
+  const srcPort = resolveNodeDef(typeOf(conn.source) ?? "")?.outputs.find(
+    (p) => p.id === (conn.sourceHandle ?? "out"),
+  );
+  const tgtPort = resolveNodeDef(typeOf(conn.target) ?? "")?.inputs.find(
+    (p) => p.id === (conn.targetHandle ?? "x"),
+  );
+  if (!srcPort || !tgtPort || shapesCompatible(srcPort.shape, tgtPort.shape)) return false;
+  toast.error(
+    `Shape mismatch: ${srcPort.label} ${shapeAxes(srcPort.shape)} can't feed ` +
+      `${tgtPort.label} ${shapeAxes(tgtPort.shape)}`,
+  );
+  return true;
+}
+
 // autosave module state (declared before the store so loadProject can reset the save baseline)
 let suppressSave = false; // true while loadProject swaps a canvas in, so the load isn't re-saved
 let lastSavedSig = ""; // signature of the last persisted canvas (dedupes no-op saves)
@@ -187,6 +207,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       return;
     }
     if (rejectIfOccupied(edges, conn)) return;
+    if (rejectIfShapeMismatch(get().nodes, conn)) return;
     // a data edge must not break an existing fusion chain (fuse-first-then-connect)
     const next = addEdge({ ...conn }, edges);
     const err = fusionChainError(next);
@@ -200,6 +221,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   onReconnect: (oldEdge, newConnection) => {
     const { edges } = get();
     if (rejectIfOccupied(edges, newConnection, oldEdge.id)) return;
+    if (rejectIfShapeMismatch(get().nodes, newConnection)) return;
     const next = reconnectEdge(oldEdge, newConnection, edges);
     const err = fusionChainError(next);
     if (err) {
