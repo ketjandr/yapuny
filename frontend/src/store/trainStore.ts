@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { api } from "@/lib/api";
 import { readSSE } from "@/lib/sse";
 import type { TrainRequest } from "@/lib/types";
+import { toast } from "@/store/toastStore";
 
 export type TrainStatus = "idle" | "running" | "stopping" | "completed" | "stopped" | "error";
 
@@ -47,9 +48,11 @@ const mapStatus = (s: string | undefined): TrainStatus =>
 export const useTrainStore = create<TrainState>((set, get) => {
   // consume an SSE train stream (start or follow) to completion, projecting each frame into state
   const consume = async (res: Response) => {
+    let sawFrame = false;
     try {
       for await (const ev of readSSE(res)) {
         if (ev.event !== "update") continue;
+        sawFrame = true;
         const d = ev.data;
         set((s) => {
           // append the per-step train loss once per new step (the stream ticks every step)
@@ -73,8 +76,14 @@ export const useTrainStore = create<TrainState>((set, get) => {
       set({ status: "error", error: (e as Error).message });
       return;
     }
-    // stream closed: if no terminal update arrived (dropped connection), settle to a sane state
-    set((s) => (s.status === "running" ? { status: "completed" } : s.status === "stopping" ? { status: "stopped" } : {}));
+    // stream closed. If a terminal frame already set the status, keep it. Otherwise: a dropped
+    // connection mid-run settles to completed; a stream that carried NO frames (e.g. we followed a
+    // run that just ended) never really started here, so fall back to idle rather than fake-complete.
+    set((s) => {
+      if (s.status === "stopping") return { status: "stopped" };
+      if (s.status === "running") return sawFrame ? { status: "completed" } : { ...IDLE, modelId: null };
+      return {};
+    });
   };
 
   return {
@@ -88,7 +97,27 @@ export const useTrainStore = create<TrainState>((set, get) => {
       try {
         res = await api.trainStream(req);
       } catch (e) {
-        set({ status: "error", error: (e as Error).message });
+        set({ ...IDLE, modelId: null });
+        toast.error(`Couldn't start training: ${(e as Error).message}`);
+        return;
+      }
+      // the stream endpoint returns the raw Response, so a rejected start (e.g. 409 - another model
+      // is already training) arrives as a non-OK body, not an exception. Surface it as a toast and
+      // don't leave the pane in a running/completed state it never earned.
+      if (!res.ok) {
+        const detail = await res
+          .json()
+          .then((j) => j?.detail as string | undefined)
+          .catch(() => undefined);
+        set({ ...IDLE, modelId: null });
+        toast.error(`Couldn't start training: ${detail ?? `${res.status} ${res.statusText}`}`);
+        // reflect whatever run is actually in progress so this tab's Train button disables
+        api
+          .trainStatus()
+          .then((s) => {
+            if (s?.status === "running" && s.training_id) get().follow(s.training_id);
+          })
+          .catch(() => {});
         return;
       }
       await consume(res);
