@@ -8,6 +8,7 @@ import { useEffect } from "react";
 import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvasStore";
 import { useCompileStore } from "@/store/compileStore";
+import { useValidationStore } from "@/store/validationStore";
 import { toast } from "@/store/toastStore";
 
 const STATUS_DEBOUNCE_MS = 400;
@@ -95,12 +96,22 @@ export function CompileBar() {
   const polling = useCompileStore((s) => s.polling);
   const setResult = useCompileStore((s) => s.setResult);
   const setCompiling = useCompileStore((s) => s.setCompiling);
+  const validating = useValidationStore((s) => s.validating);
+  const invalid = useValidationStore((s) => s.view.kind === "ok" && !s.view.result.valid);
   const modelId = useCanvasStore((s) => s.modelId);
   const toGraph = useCanvasStore((s) => s.toGraph);
   const markCompiled = useCanvasStore((s) => s.markCompiled);
 
   const compiled = status === "ready";
   const trainedOk = compiled && trained;
+  // can't compile while a check is in flight (validation or model/status), if the graph is invalid,
+  // if already compiled, or mid-compile
+  const disabled = compiling || polling || validating || invalid || compiled;
+  const title = invalid
+    ? "Fix the graph errors before compiling"
+    : compiled
+      ? "Graph is already compiled"
+      : "Compile the current graph";
 
   const onCompile = async () => {
     if (compiling) return;
@@ -121,9 +132,9 @@ export function CompileBar() {
       <button
         type="button"
         className={`compile-btn${compiling ? " compiling" : ""}`}
-        disabled={compiling || polling || compiled}
+        disabled={disabled}
         onClick={onCompile}
-        title={compiled ? "Graph is already compiled" : "Compile the current graph"}
+        title={title}
       >
         {compiling ? "compiling…" : "Compile"}
       </button>

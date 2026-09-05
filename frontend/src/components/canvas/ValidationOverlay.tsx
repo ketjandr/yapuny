@@ -1,21 +1,9 @@
-// Debounced live graph validation; shows "offline" if the worker is unreachable.
-import { useEffect, useMemo, useState } from "react";
+// Debounced live graph validation; shows "offline" if the worker is unreachable. Result lives in
+// validationStore so CompileBar can gate the Compile button on validity + in-flight checks.
+import { useEffect } from "react";
 import { api } from "@/lib/api";
-import type { YNodeData } from "@/lib/graph";
-import { humanizeMessage, structuralIds } from "@/lib/structuralId";
 import { useCanvasStore } from "@/store/canvasStore";
-
-interface ValidationResult {
-  valid: boolean;
-  errors: string[];
-  warnings: string[];
-}
-
-type State =
-  | { kind: "idle" }
-  | { kind: "checking" }
-  | { kind: "ok"; result: ValidationResult }
-  | { kind: "offline" };
+import { type ValidationResult, useValidationStore } from "@/store/validationStore";
 
 const DEBOUNCE_MS = 400;
 
@@ -23,38 +11,27 @@ export function ValidationOverlay() {
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const meta = useCanvasStore((s) => s.meta);
-  const blockStart = useCanvasStore((s) => s.blockStart);
-  const blockEnd = useCanvasStore((s) => s.blockEnd);
   const toGraph = useCanvasStore((s) => s.toGraph);
 
-  const [state, setState] = useState<State>({ kind: "idle" });
-
-  // signature of only validation-relevant graph content: node id/type/quant, edge endpoints +
-  // type (incl. fusion), meta, block markers. Excludes positions/selection, so dragging nodes
-  // around (or selecting) never re-validates - only a real structural change bumps it.
-  const sig = useMemo(
-    () =>
-      JSON.stringify({
-        n: nodes.map((n) => [n.id, (n.data as YNodeData).type, (n.data as YNodeData).quantized]),
-        e: edges.map((e) => [e.source, e.sourceHandle, e.target, e.targetHandle, e.type]),
-        meta,
-        block: [blockStart, blockEnd],
-      }),
-    [nodes, edges, meta, blockStart, blockEnd],
-  );
+  const view = useValidationStore((s) => s.view);
+  const setView = useValidationStore((s) => s.setView);
+  const setValidating = useValidationStore((s) => s.setValidating);
 
   useEffect(() => {
     let cancelled = false;
-    // Show "validating" from the moment of the edit and hold it through the debounce AND the
-    // in-flight request, until the response lands - a continuous pending state (like saving…).
-    setState({ kind: "checking" });
+    // keep the last "ok" result visible while re-checking (no message flicker); the Compile button
+    // uses the separate `validating` flag, which stays true through the debounce + request
+    if (useValidationStore.getState().view.kind !== "ok") setView({ kind: "checking" });
+    setValidating(true);
 
     const t = setTimeout(async () => {
       try {
         const result = (await api.validate(toGraph())) as ValidationResult;
-        if (!cancelled) setState({ kind: "ok", result });
+        if (!cancelled) setView({ kind: "ok", result });
       } catch {
-        if (!cancelled) setState({ kind: "offline" });
+        if (!cancelled) setView({ kind: "offline" });
+      } finally {
+        if (!cancelled) setValidating(false); // superseded checks leave it to the newest effect
       }
     }, DEBOUNCE_MS);
 
@@ -63,50 +40,29 @@ export function ValidationOverlay() {
       clearTimeout(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig]);
-
-  // structural (readable) id per node, so backend messages read in canvas terms
-  const ids = useMemo(() => structuralIds(nodes, edges), [nodes, edges]);
+  }, [nodes, edges, meta]);
 
   return (
     <div className="vpanel">
-      {state.kind === "offline" && <div className="vrow vmuted">validation offline — worker unreachable</div>}
-      {state.kind === "checking" && <div className="vrow vmuted">validating…</div>}
-      {state.kind === "ok" && <ValidationBody result={state.result} ids={ids} />}
+      {view.kind === "offline" && <div className="vrow vmuted">validation offline — worker unreachable</div>}
+      {view.kind === "checking" && <div className="vrow vmuted">validating…</div>}
+      {view.kind === "ok" && <ValidationBody result={view.result} />}
     </div>
   );
 }
 
-// humanize each message and drop duplicates (a block-internal error repeats per unrolled layer,
-// all collapsing to the same canvas node), preserving order
-function humanizeUnique(msgs: string[], ids: Map<string, string>): string[] {
-  const out: string[] = [];
-  for (const m of msgs) {
-    const h = humanizeMessage(m, ids);
-    if (!out.includes(h)) out.push(h);
-  }
-  return out;
-}
-
-// when there is no input -> output path, every other error (missing required nodes, unconnected
-// inputs, ...) is downstream noise from the same root cause - surface just this one
-const NO_PATH = "no complete path from graph input to output";
-
-function ValidationBody({ result, ids }: { result: ValidationResult; ids: Map<string, string> }) {
+function ValidationBody({ result }: { result: ValidationResult }) {
   if (result.valid && result.warnings.length === 0) {
-    return <div className="vrow vok">✓ model valid</div>;
-  }
-  if (result.errors.includes(NO_PATH)) {
-    return <div className="vrow verr">● {NO_PATH}</div>;
+    return <div className="vrow vok">✓ graph valid</div>;
   }
   return (
     <>
-      {humanizeUnique(result.errors, ids).map((e, i) => (
+      {result.errors.map((e, i) => (
         <div key={`e${i}`} className="vrow verr">
           ● {e}
         </div>
       ))}
-      {humanizeUnique(result.warnings, ids).map((w, i) => (
+      {result.warnings.map((w, i) => (
         <div key={`w${i}`} className="vrow vwarn">
           ▲ {w}
         </div>
