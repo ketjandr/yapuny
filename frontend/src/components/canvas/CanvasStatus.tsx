@@ -4,9 +4,10 @@
 //    "needs compile/compiled" and "needs train/trained" indicators with glowing dots.
 // model_status is polled (debounced) on every graph change so the indicators reflect the worker's
 // in-memory model cache; compile / status also report `trained` when weights load from the locker.
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useTooltip } from "@/components/tooltipContext";
 import { api } from "@/lib/api";
+import { analyzeBlock } from "@/lib/block";
 import { useCanvasStore } from "@/store/canvasStore";
 import { useCompileStore } from "@/store/compileStore";
 import { useValidationStore } from "@/store/validationStore";
@@ -124,17 +125,28 @@ export function CompileBar() {
   const modelId = useCanvasStore((s) => s.modelId);
   const toGraph = useCanvasStore((s) => s.toGraph);
   const markCompiled = useCanvasStore((s) => s.markCompiled);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const blockStart = useCanvasStore((s) => s.blockStart);
+  const blockEnd = useCanvasStore((s) => s.blockEnd);
+
+  // an invalid block is dropped from toGraph (not sent), so the frontend must flag it
+  const blockInvalid = useMemo(
+    () => !!blockStart && !!blockEnd && !analyzeBlock(nodes, edges, blockStart, blockEnd).valid,
+    [nodes, edges, blockStart, blockEnd],
+  );
 
   const compiled = status === "ready";
   const trainedOk = compiled && trained;
-  // can't compile while a check is in flight (validation or model/status), if the graph is invalid,
-  // if already compiled, or mid-compile
-  const disabled = compiling || polling || validating || invalid || compiled;
-  const title = invalid
-    ? "Fix the graph errors before compiling"
-    : compiled
-      ? "Model is already compiled"
-      : "Compile the current model";
+  // can't compile while a check is in flight (validation or model/status), if the graph or block is
+  // invalid, if already compiled, or mid-compile
+  const disabled = compiling || polling || validating || invalid || blockInvalid || compiled;
+  const title =
+    invalid || blockInvalid
+      ? "Fix the graph errors before compiling"
+      : compiled
+        ? "Model is already compiled"
+        : "Compile the current model";
 
   const tip = useTooltip(title);
 
