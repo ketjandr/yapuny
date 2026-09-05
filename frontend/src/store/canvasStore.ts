@@ -1,4 +1,5 @@
-// Store: nodes/edges/meta/mode + needsCompile (structural edits set it, cosmetic don't).
+// Store: the ACTIVE project's canvas (nodes/edges/meta/mode/view). loadProject swaps it in; the
+// autosave subscription persists it per-project and bumps the project's "last edited" timestamp.
 import {
   addEdge,
   applyEdgeChanges,
@@ -15,19 +16,20 @@ import { create } from "zustand";
 import { analyzeBlock } from "@/lib/block";
 import { DEFAULT_META } from "@/lib/defaultGraph";
 import { FUSE_PORT, fusionChainError, isFusionEdge, validateFusionConnect } from "@/lib/fusion";
-import { canvasToGraph, makeEdge, makeFusionEdge, makeNode, seedToCanvas, type YNodeData } from "@/lib/graph";
+import { blankToCanvas, canvasToGraph, makeEdge, makeFusionEdge, makeNode, type YNodeData } from "@/lib/graph";
 import {
   cleanEdges,
   cleanNodes,
   type CompiledSnapshot,
-  loadPersisted,
+  loadCanvas,
   type PersistedCanvas,
-  writePersisted,
+  writeCanvas,
 } from "@/lib/persist";
 import type { GraphMetaSchema, GraphRequest } from "@/lib/types";
+import { useProjectsStore } from "@/store/projectsStore";
 import { toast } from "@/store/toastStore";
 
-const seed = seedToCanvas();
+const blank = blankToCanvas();
 
 export const N_LAYER_MIN = 1;
 export const N_LAYER_MAX = 16; // block loop count bound; shared by the config slider + block stepper
@@ -108,6 +110,7 @@ interface CanvasState {
   setMode: (mode: CanvasMode) => void;
   setViewport: (vp: Viewport) => void;
   setSaveStatus: (status: "saving" | "saved") => void;
+  loadProject: (id: string) => void;
 
   toGraph: () => GraphRequest;
 }
@@ -133,30 +136,23 @@ function rejectIfOccupied(edges: Edge[], conn: Connection, exceptId?: string): b
   return false;
 }
 
-// restore the last session from localStorage, else start from the seed graph
-const persisted = loadPersisted();
-
-// stable per-canvas id, minted once and persisted; the backend keys its model cache + locker by it
-function mintModelId(): string {
-  try {
-    return crypto.randomUUID();
-  } catch {
-    return `m_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  }
-}
+// autosave module state (declared before the store so loadProject can reset the save baseline)
+let suppressSave = false; // true while loadProject swaps a canvas in, so the load isn't re-saved
+let lastSavedSig = ""; // signature of the last persisted canvas (dedupes no-op saves)
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useCanvasStore = create<CanvasState>((set, get) => ({
-  nodes: persisted?.nodes ?? seed.nodes,
-  edges: persisted?.edges ?? seed.edges,
-  meta: persisted?.meta ?? DEFAULT_META,
-  mode: persisted?.mode ?? "train", // editing/training is the default view
+  nodes: blank.nodes,
+  edges: blank.edges,
+  meta: DEFAULT_META,
+  mode: "train", // editing/training is the default view
   selectedId: null,
-  modelId: persisted?.modelId ?? mintModelId(),
-  lastCompiled: persisted?.lastCompiled ?? null,
-  viewport: persisted?.viewport ?? null,
+  modelId: "", // set by loadProject when a project's canvas is loaded into the editor
+  lastCompiled: null,
+  viewport: null,
   saveStatus: "saved",
-  blockStart: persisted?.blockStart ?? null,
-  blockEnd: persisted?.blockEnd ?? null,
+  blockStart: null,
+  blockEnd: null,
   clipboard: null,
 
   // needsCompile/trained are NOT tracked here — the backend (worker model cache + weight locker) is
@@ -342,6 +338,36 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setViewport: (viewport) => set({ viewport }), // pan/zoom is cosmetic -> no needsCompile
   setSaveStatus: (saveStatus) => set({ saveStatus }),
 
+  // swap a project's canvas into the editor (called on entering the playground). Autosave is
+  // suppressed during the swap and the save baseline reset, so loading isn't mistaken for an edit.
+  loadProject: (id) => {
+    const c: PersistedCanvas = loadCanvas(id) ?? {
+      ...blankToCanvas(),
+      meta: DEFAULT_META,
+      mode: "train",
+      blockStart: null,
+      blockEnd: null,
+      lastCompiled: null,
+      viewport: null,
+    };
+    suppressSave = true;
+    set({
+      nodes: c.nodes,
+      edges: c.edges,
+      meta: c.meta,
+      mode: c.mode,
+      blockStart: c.blockStart,
+      blockEnd: c.blockEnd,
+      viewport: c.viewport,
+      lastCompiled: c.lastCompiled,
+      modelId: id,
+      selectedId: null,
+      saveStatus: "saved",
+    });
+    suppressSave = false;
+    lastSavedSig = JSON.stringify(persistableOf(get()));
+  },
+
   // emit the block only when it is a valid single-in/single-out shape-preserving slice
   toGraph: () => {
     const s = get();
@@ -362,7 +388,6 @@ function persistableOf(s: CanvasState): PersistedCanvas {
     edges: cleanEdges(s.edges),
     meta: s.meta,
     mode: s.mode,
-    modelId: s.modelId,
     lastCompiled: s.lastCompiled,
     viewport: s.viewport,
     blockStart: s.blockStart,
@@ -370,18 +395,18 @@ function persistableOf(s: CanvasState): PersistedCanvas {
   };
 }
 
-let lastSig = JSON.stringify(persistableOf(useCanvasStore.getState()));
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
 useCanvasStore.subscribe((s) => {
+  if (suppressSave || !s.modelId) return; // mid-load, or no active project (e.g. on the Models page)
   const data = persistableOf(s);
   const sig = JSON.stringify(data);
-  if (sig === lastSig) return; // nothing persistable changed (selection / saveStatus / clipboard)
-  lastSig = sig;
+  if (sig === lastSavedSig) return; // nothing persistable changed (selection / saveStatus / clipboard)
+  lastSavedSig = sig;
+  const id = s.modelId;
   if (s.saveStatus !== "saving") useCanvasStore.setState({ saveStatus: "saving" });
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    writePersisted(data);
+    writeCanvas(id, data);
+    useProjectsStore.getState().touch(id); // bump the project's "last edited" timestamp
     useCanvasStore.setState({ saveStatus: "saved" });
   }, SAVE_DEBOUNCE_MS);
 });

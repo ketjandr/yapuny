@@ -1,23 +1,23 @@
-// App shell: nav + (left pane, canvas, right pane).
-import { Navbar } from "@/components/Navbar";
-import { Canvas } from "@/components/canvas/Canvas";
-import { LeftPane } from "@/components/panes/LeftPane";
+// App: client-side router (SPA). "/" is the Models home; "/m/:id" is the playground for one project.
+// Routing is entirely client-side — one bundle, no server round-trips; the URL just mirrors which
+// model is open, so deep-links and refreshes land on the right place.
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { ModelsPage } from "@/pages/ModelsPage";
+import { PlaygroundRoute } from "@/pages/Playground";
 import { ToastContainer } from "@/components/Toast";
 import { TooltipLayer } from "@/components/Tooltip";
-import { RightPane } from "@/components/panes/RightPane";
 
 export default function App() {
   return (
-    <TooltipLayer>
-      <div className="app">
-        <Navbar />
-        <div className="body">
-          <LeftPane />
-          <Canvas />
-          <RightPane />
-        </div>
+    <BrowserRouter>
+      <TooltipLayer>
+        <Routes>
+          <Route path="/" element={<ModelsPage />} />
+          <Route path="/m/:id" element={<PlaygroundRoute />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
         <ToastContainer />
-      </div>
-    </TooltipLayer>
+      </TooltipLayer>
+    </BrowserRouter>
   );
 }

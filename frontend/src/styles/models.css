@@ -1,0 +1,332 @@
+/* Models home page: grid of project cards + the new-model template picker. */
+
+/* clickable brand in the navbar (returns to the models home) */
+.brand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background: none;
+  padding: 0;
+}
+.brand-btn:hover .brand-name {
+  color: #fff;
+}
+
+.home {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+  overflow: hidden;
+}
+.home-nav {
+  height: var(--nav-h);
+  flex: 0 0 var(--nav-h);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg2);
+}
+.home-main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 32px clamp(20px, 6vw, 80px);
+}
+.home-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+.home-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--txt);
+}
+.home-new {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 9px 16px;
+  border-radius: 8px;
+  color: #0a0c11;
+  background: #fff;
+  border: 1px solid #fff;
+}
+.home-new:hover {
+  background: #e7eaf1;
+  border-color: #e7eaf1;
+}
+.home-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 80px 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* card grid — wide cards since transformer graphs run long horizontally */
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 22px;
+}
+.mcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  transition: border-color 0.15s ease;
+}
+.mcard:hover {
+  border-color: var(--line3);
+}
+/* preview area: the graph thumbnail on a darker ground; 16:9 to fit long graphs */
+.mcard-preview {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 45%, #0d1017 0%, var(--panel2) 100%);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+/* static graph schematic */
+.mcard-thumb {
+  width: 100%;
+  height: 100%;
+  display: block;
+  padding: 10px;
+}
+.mt-edge {
+  fill: none;
+  stroke: #38414f;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.mt-node {
+  fill-opacity: 0.9;
+  stroke: rgba(0, 0, 0, 0.35);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+/* fallback glyph when a project has no drawable nodes yet */
+.mcard-glyph {
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  border: 1.5px solid var(--line3);
+  position: relative;
+}
+.mcard-glyph::before {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted);
+}
+.mcard:hover .mcard-preview {
+  background: radial-gradient(ellipse at 50% 45%, #10141c 0%, var(--panel2) 100%);
+}
+.mcard-foot {
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mcard-title {
+  width: 100%;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--txt);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 3px 5px;
+  margin: -3px -5px;
+  outline: none;
+}
+.mcard-title:hover {
+  border-color: var(--line2);
+}
+.mcard-title:focus {
+  border-color: var(--line3);
+  background: var(--panel2);
+}
+.mcard-sub {
+  font-size: 10.5px;
+  color: var(--faint);
+  padding: 0 5px;
+}
+/* delete: a small corner button that appears on hover */
+.mcard-del {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--txt2);
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  backdrop-filter: blur(3px);
+}
+.mcard:hover .mcard-del {
+  opacity: 1;
+}
+.mcard-del:hover {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, var(--line2));
+}
+/* delete confirmation overlay covering the card */
+.mcard-confirm {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--txt);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(4px);
+}
+.mcard-confirm-row {
+  display: flex;
+  gap: 8px;
+}
+.mcard-confirm-row button {
+  font-size: 11px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  color: var(--txt2);
+  background: var(--panel);
+  border: 1px solid var(--line2);
+}
+.mcard-confirm-row button:hover {
+  border-color: var(--line3);
+  color: var(--txt);
+}
+.mcard-confirm-row button.danger {
+  color: #fff;
+  background: color-mix(in srgb, var(--red) 70%, #000);
+  border-color: var(--red);
+}
+.mcard-confirm-row button.danger:hover {
+  background: var(--red);
+}
+
+/* new-model modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+.modal {
+  width: min(520px, 92vw);
+  padding: 22px 24px 26px;
+  background: var(--bg2);
+  border: 1px solid var(--line2);
+  border-radius: 12px;
+  box-shadow: 0 34px 90px -34px #000;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--txt);
+}
+.modal-x {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--muted);
+  border-radius: 6px;
+}
+.modal-x:hover {
+  color: var(--txt);
+  background: var(--line);
+}
+.modal-sub {
+  margin: 4px 0 18px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.tpl-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.tpl {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px;
+  text-align: left;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line2);
+}
+.tpl:hover {
+  border-color: var(--ice-dim);
+  background: #0a1418;
+}
+.tpl-glyph {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1.5px solid var(--line3);
+  margin-bottom: 4px;
+}
+.tpl-glyph[data-tpl="unfused"] {
+  border-style: solid;
+  border-color: var(--steel);
+}
+.tpl-glyph[data-tpl="blank"] {
+  border-style: dashed;
+}
+.tpl-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--txt);
+}
+.tpl-desc {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}

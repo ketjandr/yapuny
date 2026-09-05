@@ -44,6 +44,17 @@ export function seedToCanvas(): { nodes: Node[]; edges: Edge[] } {
   return { nodes, edges };
 }
 
+// blank canvas: only the input/output endpoints, ready to wire a graph from scratch
+export function blankToCanvas(): { nodes: Node[]; edges: Edge[] } {
+  return {
+    nodes: [
+      rfNode("_input", "_input", INPUT_POS.x, INPUT_POS.y),
+      rfNode("_output", "_output", OUTPUT_POS.x, OUTPUT_POS.y),
+    ],
+    edges: [],
+  };
+}
+
 // canvas -> GraphRequest. The _input / _output pseudo-nodes are dropped as nodes, but their edges
 // are kept: _input seeds the graph, _output anchors the sink so validation requires a complete
 // input -> output chain. The compiler treats both as pseudo-endpoints (never built or executed).

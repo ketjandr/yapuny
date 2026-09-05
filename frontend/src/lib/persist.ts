@@ -1,11 +1,12 @@
-// Canvas persistence: serialize the graph + view state to localStorage so the canvas survives a
-// reload. Pure helpers only (no store import, to avoid a cycle); the autosave subscription that
-// calls writePersisted lives in the store. Transient React Flow flags (selection / drag) are
-// normalized out so selecting a node doesn't churn the save or pollute the persisted blob.
+// Per-project canvas persistence. Each project's graph + view state is stored under its own key
+// (yapuny.canvas.<id>) so the Models page can hold many independent canvases; the projects index
+// (titles / timestamps) lives in lib/projects.ts. Pure helpers only (no store import). Transient
+// React Flow flags (selection / drag) are normalized out so selecting a node doesn't churn saves.
 import type { Edge, Node, Viewport } from "@xyflow/react";
 import type { GraphMetaSchema } from "./types";
 
-export const STORAGE_KEY = "yapuny.canvas.v1";
+const CANVAS_PREFIX = "yapuny.canvas.";
+const canvasKey = (id: string) => `${CANVAS_PREFIX}${id}`;
 
 // the graph state captured at compile time; the target of "revert to compiled"
 export interface CompiledSnapshot {
@@ -18,7 +19,6 @@ export interface CompiledSnapshot {
 
 export interface PersistedCanvas extends CompiledSnapshot {
   mode: "train" | "inference";
-  modelId: string; // stable id keying the backend model cache + weight locker
   lastCompiled: CompiledSnapshot | null;
   viewport: Viewport | null;
 }
@@ -31,20 +31,28 @@ export function cleanEdges(edges: Edge[]): Edge[] {
   return edges.map((e) => ({ ...e, selected: false }));
 }
 
-export function loadPersisted(): PersistedCanvas | null {
+export function loadCanvas(id: string): PersistedCanvas | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(canvasKey(id));
     if (!raw) return null;
     return JSON.parse(raw) as PersistedCanvas;
   } catch {
-    return null; // unavailable / corrupt -> fall back to the seed graph
+    return null; // unavailable / corrupt
   }
 }
 
-export function writePersisted(data: PersistedCanvas): void {
+export function writeCanvas(id: string, data: PersistedCanvas): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(canvasKey(id), JSON.stringify(data));
   } catch {
-    /* quota exceeded / storage disabled -> silently skip this save */
+    /* quota exceeded / storage disabled -> skip */
+  }
+}
+
+export function deleteCanvas(id: string): void {
+  try {
+    localStorage.removeItem(canvasKey(id));
+  } catch {
+    /* ignore */
   }
 }
