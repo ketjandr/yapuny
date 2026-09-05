@@ -1,10 +1,9 @@
 // Navbar: brand (returns to the Models home) + active project title + worker status.
-import { useNavigate } from "react-router-dom";
+import { BrandButton } from "@/components/BrandButton";
 import { useCanvasStore } from "@/store/canvasStore";
 import { useProjectsStore } from "@/store/projectsStore";
 
 export function Navbar() {
-  const navigate = useNavigate();
   const modelId = useCanvasStore((s) => s.modelId);
   const title = useProjectsStore(
     (s) => s.projects.find((p) => p.id === modelId)?.title ?? "untitled",
@@ -13,10 +12,7 @@ export function Navbar() {
   return (
     <header className="nav">
       <div className="brand">
-        <button className="brand-btn" type="button" onClick={() => navigate("/")} title="Back to models">
-          <span className="mark" />
-          <span className="brand-name">Yapuny</span>
-        </button>
+        <BrandButton />
         <span className="proj">
           model <b>{title}</b>
         </span>

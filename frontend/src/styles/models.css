@@ -7,9 +7,11 @@
   gap: 12px;
   background: none;
   padding: 0;
+  color: var(--txt); /* brand-name inherits this: white on neutral (button default would be black) */
+  cursor: pointer;
 }
 .brand-btn:hover .brand-name {
-  color: #fff;
+  color: #fff; /* light up on hover */
 }
 
 .home {

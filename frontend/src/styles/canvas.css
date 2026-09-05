@@ -225,12 +225,11 @@
   bottom: 52px;
   z-index: 6;
   max-width: 360px;
-  max-height: 40%;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 3px;
-  pointer-events: none;
+  pointer-events: none; /* empty area stays click-through; interactive children opt back in */
 }
 .vrow {
   font-family: var(--mono);
@@ -242,12 +241,68 @@
   background: color-mix(in srgb, var(--panel) 88%, transparent);
   backdrop-filter: blur(3px);
 }
+/* fixed-size summary header: counts never grow, click to collapse/expand the detail list */
+.vhead {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  padding: 5px 9px;
+  border-radius: 3px;
+  border: 1px solid var(--line2);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(3px);
+  color: var(--txt2);
+  cursor: pointer;
+}
+.vhead:hover {
+  border-color: var(--muted);
+}
+.vcount {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.vcount.verr {
+  color: var(--red);
+}
+.vcount.vwarn {
+  color: var(--amber);
+}
+.vchev {
+  margin-left: auto;
+  padding-left: 4px;
+  color: var(--muted);
+  transition: transform 0.12s ease;
+}
+.vchev.o {
+  transform: rotate(90deg);
+}
+/* detail list: scrolls within a capped height so it never grows unbounded, hidden scrollbar */
+.vlist {
+  pointer-events: auto;
+  max-width: 360px;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  scrollbar-width: none;
+}
+.vlist::-webkit-scrollbar {
+  display: none;
+}
 .vmuted {
   color: var(--muted);
 }
 .vok {
   color: var(--green);
   border-color: #23402d;
+  pointer-events: auto; /* capture the cursor as neutral instead of the canvas grab cursor */
+  cursor: default;
 }
 .verr {
   color: var(--red);

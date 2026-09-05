@@ -1,6 +1,7 @@
 // Models home: a grid of the user's projects.
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { BrandButton } from "@/components/BrandButton";
 import { GraphThumbnail } from "@/components/GraphThumbnail";
 import { TEMPLATES, type Project, type TemplateKey } from "@/lib/projects";
 import { useProjectsStore } from "@/store/projectsStore";
@@ -35,8 +36,7 @@ export function ModelsPage() {
     <div className="home">
       <header className="home-nav">
         <div className="brand">
-          <span className="mark" />
-          <span className="brand-name">Yapuny</span>
+          <BrandButton />
         </div>
       </header>
 
