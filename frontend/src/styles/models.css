@@ -123,6 +123,26 @@
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
+/* quantized node: silver border (optimistic — never shown as unsupported/red) */
+.mt-node.q {
+  stroke: #c3c9d4;
+  stroke-width: 1.5;
+}
+/* block region: always blue, behind everything */
+.mt-block {
+  fill: color-mix(in srgb, var(--ice) 9%, transparent);
+  stroke: var(--ice-dim);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+/* fusion beam: always green */
+.mt-fuse {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 1.75;
+  stroke-opacity: 0.9;
+  vector-effect: non-scaling-stroke;
+}
 /* fallback glyph when a project has no drawable nodes yet */
 .mcard-glyph {
   width: 46px;
@@ -321,6 +341,28 @@
 }
 .tpl-glyph[data-tpl="blank"] {
   border-style: dashed;
+}
+.tpl-glyph[data-tpl="fused"] {
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 20%, transparent);
+}
+.tpl-glyph[data-tpl="quantized"] {
+  border-color: #c3c9d4;
+  background: linear-gradient(180deg, #dee2e9 0%, #a9b1c0 100%);
+}
+/* W4 is a deeper quantization -> a darker silver than W8 */
+.tpl-glyph[data-tpl="quantized_w4"] {
+  border-color: #9198a6;
+  background: linear-gradient(180deg, #b7bdc8 0%, #7f8797 100%);
+}
+/* combination: a diagonal split of the fused (green) and quantized (silver) fills */
+.tpl-glyph[data-tpl="fused_quant"] {
+  border-color: var(--steel);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--green) 24%, transparent) 0 50%,
+    #a9b1c0 50% 100%
+  );
 }
 .tpl-label {
   font-size: 13px;

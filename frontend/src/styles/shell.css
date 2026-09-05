@@ -56,6 +56,28 @@
   color: var(--muted);
   font-weight: 500;
 }
+/* inline-editable title: seamless until hover/focus, then a subtle affordance */
+.proj-title {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--muted);
+  font-weight: 500;
+  min-width: 4ch;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  field-sizing: content;
+}
+.proj-title:hover {
+  border-color: var(--line2);
+}
+.proj-title:focus {
+  outline: none;
+  color: var(--txt);
+  border-color: var(--ice-dim);
+  background: var(--panel);
+}
 .nav-r {
   display: flex;
   align-items: center;

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { BrandButton } from "@/components/BrandButton";
 import { GraphThumbnail } from "@/components/GraphThumbnail";
-import { TEMPLATES, type Project, type TemplateKey } from "@/lib/projects";
+import { TEMPLATES, TITLE_MAX, type Project, type TemplateKey } from "@/lib/projects";
 import { useProjectsStore } from "@/store/projectsStore";
 
 function relativeTime(ts: number): string {
@@ -84,6 +84,7 @@ function ModelCard({ project, onOpen }: { project: Project; onOpen: () => void }
         <input
           className="mcard-title"
           defaultValue={project.title}
+          maxLength={TITLE_MAX}
           spellCheck={false}
           onBlur={(e) => rename(project.id, e.target.value.trim() || "Untitled model")}
           onKeyDown={(e) => {
