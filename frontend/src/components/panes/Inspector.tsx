@@ -89,7 +89,6 @@ export function Inspector() {
 function NodeProps({
   node,
   edges,
-  ids,
   typeOf,
   friendly,
   blockStart,
@@ -134,18 +133,16 @@ function NodeProps({
     [edges, node.id],
   );
   // fusion is shown by kernel + this node's slot (constant length), not by listing every member
-  const order = useMemo(() => new Map([...ids.keys()].map((id, i) => [id, i])), [ids]);
   const fusion = useMemo(() => {
     if (!group) return "none";
     const n = group.length;
     const dataEdges = edges.filter((e) => e.type !== "fusion");
     const kernel = matchFusionKernel(group, typeOf, dataEdges, catalog);
     if (kernel) {
-      const chain = [...group].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
-      return `${kernel} · ${chain.indexOf(node.id) + 1}/${n}`;
+      return `${kernel}`;
     }
     return catalog?.available ? `${n} nodes · invalid` : `${n} nodes`;
-  }, [group, edges, typeOf, catalog, order, node.id]);
+  }, [group, edges, typeOf, catalog]);
 
   const blockRole =
     node.id === blockStart && node.id === blockEnd

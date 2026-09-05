@@ -1,6 +1,7 @@
 // Derive the block node set from its start/end markers and validate it can loop:
 // a single-input / single-output slice whose output shape matches its input (shape-preserving).
 import type { Edge, Node } from "@xyflow/react";
+import { deriveFusionGroups } from "./fusion";
 import type { YNodeData } from "./graph";
 import { type Axis, resolveNodeDef } from "./nodeCatalog";
 
@@ -9,6 +10,8 @@ export interface BlockAnalysis {
   valid: boolean;
   error?: string;
   problemEdgeIds?: string[]; // edges to highlight for the current error (multi in/out)
+  fuseBadNodeIds?: string[]; // fusion nodes to flag red (a group straddling the block boundary)
+  fuseBadEdgeIds?: string[]; // fusion beams to flag red (a group straddling the block boundary)
 }
 
 function adjacency(edges: Edge[], reverse: boolean): Map<string, string[]> {
@@ -59,10 +62,31 @@ export function analyzeBlock(
 ): BlockAnalysis {
   if (!startId || !endId) return { nodeIds: new Set(), valid: false, error: "mark a block start and end" };
 
-  edges = edges.filter((e) => e.type !== "fusion"); // fusion streams are not data flow
+  // derive fusion groups from the full edge set before dropping the fusion streams (which are not
+  // data flow and don't count toward block reachability)
+  const fusionGroups = deriveFusionGroups(edges);
+  const fusionEdges = edges.filter((e) => e.type === "fusion");
+  edges = edges.filter((e) => e.type !== "fusion");
   const nodeIds = deriveBlockNodes(edges, startId, endId);
   if (!nodeIds.has(startId) || !nodeIds.has(endId)) {
     return { nodeIds, valid: false, error: "the block end must be downstream of the block start" };
+  }
+
+  // A fusion group must sit wholly inside or wholly outside the block: on unroll each fused kernel
+  // is replicated per layer, so a group split by the boundary can't be expanded (the backend's
+  // expand_blocks rejects it too). Flag the straddling group's nodes + beams red.
+  for (const group of fusionGroups) {
+    const inside = group.filter((id) => nodeIds.has(id)).length;
+    if (inside > 0 && inside < group.length) {
+      const g = new Set(group);
+      return {
+        nodeIds,
+        valid: false,
+        error: "a fusion group straddles the block boundary",
+        fuseBadNodeIds: group,
+        fuseBadEdgeIds: fusionEdges.filter((e) => g.has(e.source) && g.has(e.target)).map((e) => e.id),
+      };
+    }
   }
 
   // A loopable block reads exactly ONE external tensor and emits exactly ONE. That single

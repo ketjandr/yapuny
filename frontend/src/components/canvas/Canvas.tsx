@@ -83,34 +83,43 @@ function CanvasInner() {
     return bad;
   }, [nodes, quantCatalog, mode]);
 
+  const blockAnalysis = useMemo(
+    () => analyzeBlock(nodes, edges, blockStart, blockEnd),
+    [nodes, edges, blockStart, blockEnd],
+  );
+
   // mark the edges the block error blames (multi input/output tensors) + invalid fusion beams;
-  // fusion edges already carry their own type and render as the beam
+  // fusion edges already carry their own type and render as the beam. A fusion group straddling
+  // the block boundary flags its beams red too (blockAnalysis.fuseBadEdgeIds).
   const displayEdges = useMemo(() => {
-    const blockBad = new Set(analyzeBlock(nodes, edges, blockStart, blockEnd).problemEdgeIds ?? []);
-    if (blockBad.size === 0 && fusion.badEdges.size === 0) return edges;
+    const blockBad = new Set(blockAnalysis.problemEdgeIds ?? []);
+    const fuseBad = new Set([...fusion.badEdges, ...(blockAnalysis.fuseBadEdgeIds ?? [])]);
+    if (blockBad.size === 0 && fuseBad.size === 0) return edges;
     return edges.map((e) => {
       const extra = [
         blockBad.has(e.id) ? "edge-error" : "",
-        fusion.badEdges.has(e.id) ? "fuse-bad" : "",
+        fuseBad.has(e.id) ? "fuse-bad" : "",
       ].filter(Boolean);
       return extra.length ? { ...e, className: [e.className, ...extra].filter(Boolean).join(" ") } : e;
     });
-  }, [nodes, edges, blockStart, blockEnd, fusion]);
+  }, [edges, blockAnalysis, fusion]);
 
   // live preview of the node being dragged from the registry, in flow coords (null = not dragging)
   const [preview, setPreview] = useState<{ type: string; x: number; y: number } | null>(null);
 
-  // flag red: nodes in an invalid fusion group, and quantized nodes the worker can't quantize
+  // flag red: nodes in an invalid fusion group (incl. a group straddling the block boundary), and
+  // quantized nodes the worker can't quantize
   const displayNodes = useMemo(() => {
-    if (fusion.badNodes.size === 0 && quantBad.size === 0) return nodes;
+    const fuseBad = new Set([...fusion.badNodes, ...(blockAnalysis.fuseBadNodeIds ?? [])]);
+    if (fuseBad.size === 0 && quantBad.size === 0) return nodes;
     return nodes.map((n) => {
       const extra = [
-        fusion.badNodes.has(n.id) ? "fuse-bad" : "",
+        fuseBad.has(n.id) ? "fuse-bad" : "",
         quantBad.has(n.id) ? "quant-bad" : "",
       ].filter(Boolean);
       return extra.length ? { ...n, className: [n.className, ...extra].filter(Boolean).join(" ") } : n;
     });
-  }, [nodes, fusion, quantBad]);
+  }, [nodes, fusion, quantBad, blockAnalysis]);
 
   // append the drag-preview node so the registry node visibly materializes at the drop point;
   // it is inert (not selectable/draggable) and marked .ghost so it reads as tentative
