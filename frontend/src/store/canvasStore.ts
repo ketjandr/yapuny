@@ -103,6 +103,7 @@ interface CanvasState {
   setBlockStart: (id: string | null) => void;
   setBlockEnd: (id: string | null) => void;
   clearBlock: () => void;
+  setQuantized: (id: string, mode: string | null) => void;
   setNLayer: (n: number) => void;
   setMeta: (patch: Partial<GraphMetaSchema>) => void;
   markCompiled: () => void;
@@ -291,6 +292,13 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setBlockStart: (id) => set({ blockStart: id }),
   setBlockEnd: (id) => set({ blockEnd: id }),
   clearBlock: () => set({ blockStart: null, blockEnd: null }),
+  // quantization is an inference-only weight transform (structural for the full hash, not training)
+  setQuantized: (id, mode) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) =>
+        n.id === id ? { ...n, data: { ...(n.data as YNodeData), quantized: mode } } : n,
+      ),
+    })),
   // loop count; also structural (changes the unrolled depth)
   setNLayer: (n) =>
     set((s) => ({

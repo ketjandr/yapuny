@@ -1,6 +1,6 @@
 // Canvas status overlays, driven by the worker (source of truth):
 //  - SaveBar (bottom-left, by the validator): autosave "Saving…/Saved" chip + revert-to-compiled.
-//  - CompileBar (top-center): Compile button (calls the compile API, shows "compiling…") +
+//  - CompileBar (bottom-center): Compile button (calls the compile API, shows "compiling…") +
 //    "needs compile/compiled" and "needs train/trained" indicators with glowing dots.
 // model_status is polled (debounced) on every graph change so the indicators reflect the worker's
 // in-memory model cache; compile / status also report `trained` when weights load from the locker.

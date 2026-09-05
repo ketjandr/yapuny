@@ -166,7 +166,7 @@
 /* fixed height so the split boundary never moves as the selection (node/edge/none) changes */
 .pane-insp {
   flex: 0 0 auto;
-  height: 232px;
+  height: 276px; /* taller to fit the node action toolbar (quantize + block start/end) */
   overflow-y: auto;
   overscroll-behavior: none;
   scrollbar-width: none;

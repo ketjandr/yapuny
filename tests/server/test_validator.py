@@ -1,6 +1,7 @@
 import pytest
 
 from server.compiler.fusion_registry import FUSION_AVAILABLE
+from server.compiler.quantization_registry import QUANTIZATION_AVAILABLE
 from server.compiler.validator import GraphValidator
 from server.models.graph import GraphSpec
 from tests.server.graph_factory import default_gpt_graph
@@ -8,6 +9,10 @@ from tests.server.graph_factory import default_gpt_graph
 requires_fusion = pytest.mark.skipif(
     not FUSION_AVAILABLE,
     reason="fusion kernels not available",
+)
+requires_quantization = pytest.mark.skipif(
+    not QUANTIZATION_AVAILABLE,
+    reason="quantization kernels not available",
 )
 
 
@@ -295,17 +300,28 @@ def _quantize_nodes(graph_dict: dict, node_ids: list[str], mode: str = "w8") -> 
 
 
 class TestQuantizationValidation:
+    @requires_quantization
     def test_valid_w8_on_mlp_up(self, validator):
         g = default_gpt_graph(**TINY)
         _quantize_nodes(g, ["b0_mlp_up"], "w8")
         result = validator.validate(GraphSpec.from_dict(g))
         assert result.valid
 
+    @requires_quantization
     def test_valid_w4_on_lm_head(self, validator):
         g = default_gpt_graph(**TINY)
         _quantize_nodes(g, ["lm_head"], "w4")
         result = validator.validate(GraphSpec.from_dict(g))
         assert result.valid
+
+    @pytest.mark.skipif(QUANTIZATION_AVAILABLE, reason="worker supports quantization")
+    def test_unsupported_worker_rejects(self, validator):
+        # opting into quantization on a worker without the kernels is a validation error
+        g = default_gpt_graph(**TINY)
+        _quantize_nodes(g, ["b0_mlp_up"], "w8")
+        result = validator.validate(GraphSpec.from_dict(g))
+        assert not result.valid
+        assert any("quantization is not supported on this worker" in e for e in result.errors)
 
     def test_invalid_mode_rejected(self, validator):
         g = default_gpt_graph(**TINY)
@@ -329,6 +345,7 @@ class TestQuantizationValidation:
         assert not result.valid
         assert any("cannot be both quantized" in e for e in result.errors)
 
+    @requires_quantization
     def test_multiple_nodes_quantized(self, validator):
         g = default_gpt_graph(**TINY)
         _quantize_nodes(g, ["b0_qkv", "b0_out_proj", "b0_mlp_up", "b0_mlp_down", "lm_head"], "w8")

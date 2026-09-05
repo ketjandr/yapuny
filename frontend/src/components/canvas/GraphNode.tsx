@@ -57,11 +57,13 @@ export function GraphNode({ id, data, selected }: NodeProps) {
   const h = nodeHeight(def);
   const dimmed = mode === "train" && !!def.trainingNoop; // inactive while training
   const cat = CATEGORY_OF[type] ? CATEGORY[CATEGORY_OF[type]] : null; // family color + badge
+  // quantization is inference-only (like fusion), so its styling/badge only show in inference mode
+  const showQuant = !!quantized && fusionVisible(mode);
   const cls = [
     "yn",
     VARIANT_CLASS[def.variant],
     selected ? "sel" : "",
-    quantized ? "quantized" : "",
+    showQuant ? "quantized" : "",
     dimmed ? "dimmed" : "",
     // fused aura is inference-only for now; this is a class on the inner div only, so it never
     // affects the RF node/handle model (the fuse-port Handles below always render).
@@ -86,7 +88,7 @@ export function GraphNode({ id, data, selected }: NodeProps) {
 
       <div className="yn-head">
         <span>{def.label}</span>
-        {quantized && <span className="qtag">{quantized.toUpperCase()}</span>}
+        {showQuant && <span className="qtag">{quantized.toUpperCase()}</span>}
       </div>
       <div className="yn-sub">{resolveSubtitle(def, meta)}</div>
 

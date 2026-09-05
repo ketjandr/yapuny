@@ -168,6 +168,40 @@
   font-size: 11px;
   color: var(--muted);
 }
+/* inspector action toolbar: quantize (if supported) + block start/end toggles */
+.insp-actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 14px;
+}
+.insp-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 28px;
+  padding: 0 7px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.insp-act:hover {
+  color: var(--txt2);
+  border-color: var(--muted);
+}
+.insp-act.on {
+  color: var(--txt);
+  border-color: var(--txt2);
+  background: color-mix(in srgb, var(--txt2) 12%, var(--panel));
+}
+.insp-act-mode {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
 .grp {
   border-bottom: 1px solid var(--hair);
   padding: 16px 16px 18px;

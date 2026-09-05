@@ -176,7 +176,11 @@ class GraphValidator:
                     errors.append(f"node {node.id}: input '{port}' not connected")
 
     def _check_quantization(self, graph: GraphSpec, errors: list[str]):
-        from server.compiler.quantization_registry import QUANT_MODES, QUANTIZABLE_NODES
+        from server.compiler.quantization_registry import (
+            QUANT_MODES,
+            QUANTIZABLE_NODES,
+            QUANTIZATION_AVAILABLE,
+        )
 
         quantized_ids = set()
         for node in graph.nodes:
@@ -194,15 +198,15 @@ class GraphValidator:
                 )
             quantized_ids.add(node.id)
 
+        # no quant kernels on this worker
+        if quantized_ids and not QUANTIZATION_AVAILABLE:
+            errors.append("quantization is not supported on this worker")
+
         # TODO: support quantized weights inside fused kernels (dequantize before tl.dot)
         if quantized_ids and graph.fusion_groups:
-            for fg in graph.fusion_groups:
-                overlap = quantized_ids & set(fg.nodes)
-                if overlap:
-                    errors.append(
-                        f"node(s) {', '.join(overlap)} cannot be both quantized"
-                        " and in a fusion group"
-                    )
+            fused = {nid for fg in graph.fusion_groups for nid in fg.nodes}
+            for nid in quantized_ids & fused:
+                errors.append(f"node {nid} cannot be both quantized and in a fusion group")
 
     def _check_fusion_groups(self, graph: GraphSpec, errors: list[str]):
         if not graph.fusion_groups:

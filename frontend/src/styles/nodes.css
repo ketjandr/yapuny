@@ -97,8 +97,6 @@
 
 /* block boundary brackets: ice book-ends hugging the entry (left) / exit (right) edge of the
    start/end nodes. Deliberately a bracket, not a pill, so it never reads as a category badge. */
-/* a solid ice tab tucked behind the node (z-index -1), so the node body overlaps its inner
-   edge and it reads as latched on. Solid fill -> no see-through gap; short -> grips the side. */
 .yn-bracket {
   position: absolute;
   top: 9px;
@@ -118,15 +116,16 @@
   border-radius: 0 4px 4px 0;
 }
 
-/* quant tag inside header */
+/* quant tag inside header: a small silver badge (W8 / W4) beside the node title */
 .qtag {
   font-family: var(--mono);
   font-size: 10px;
+  font-weight: 600;
   padding: 0 5px;
-  border-radius: 2px;
-  background: #17142a;
-  color: #bcb2e8;
-  border: 1px solid #332e4d;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #dee2e9 0%, #a9b1c0 100%);
+  color: #10131a;
+  border: 1px solid #c3c9d4;
   letter-spacing: 0.04em;
 }
 
@@ -140,7 +139,26 @@
   color: var(--txt2);
 }
 
-/* modifier: quantized (violet border + the W8/W4 header tag; accent bar stays the family color) */
+/* modifier: quantized (silver border + the silver W8/W4 header tag; accent bar stays family) */
 .yn.quantized {
-  border-color: #332e4d;
+  border-color: #a9b1c0;
+}
+
+/* quantized on a worker without quant support: flag the node + badge red (matches the validator
+   "quantization is not supported on this worker" error), same idea as the fusion red state */
+.react-flow__node.quant-bad .yn {
+  border-color: var(--red);
+  box-shadow: 0 0 0 1px var(--red), 0 0 18px -6px var(--red), 0 8px 22px -14px #000;
+}
+.react-flow__node.quant-bad .yn.sel {
+  box-shadow:
+    0 0 0 1.5px var(--txt),
+    0 0 20px -3px var(--txt),
+    0 0 18px -6px var(--red),
+    0 8px 22px -14px #000;
+}
+.react-flow__node.quant-bad .qtag {
+  background: linear-gradient(180deg, #f0b4bf, #d9738a);
+  border-color: var(--red);
+  color: #2a0d13;
 }

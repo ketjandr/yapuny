@@ -204,7 +204,8 @@ class TestQuantizationCompiler:
         g = default_gpt_graph(**TINY)
         _quantize_nodes(g, ["b0_mlp_up"], "w8")
         compiler = GraphCompiler()
-        with pytest.raises(ValueError, match="CUDA GPU"):
+        # validation now rejects before the compile-time quantize attempt
+        with pytest.raises(ValueError, match="quantization is not supported"):
             compiler.compile(GraphSpec.from_dict(g))
 
     @requires_quantization

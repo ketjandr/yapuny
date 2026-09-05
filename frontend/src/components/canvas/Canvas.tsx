@@ -64,6 +64,23 @@ function CanvasInner() {
     [nodes, edges, fusionCatalog],
   );
 
+  // same pattern for quantization: if the worker can't quantize, flag any quantized node red
+  // (matches the backend "quantization is not supported on this worker" validation error)
+  const { data: quantCatalog } = useQuery<{ available: boolean }>({
+    queryKey: ["quantization-available"],
+    queryFn: api.quantizationAvailable,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const quantBad = useMemo(() => {
+    const bad = new Set<string>();
+    // quantization is inference-only, so only flag it (red) while in inference mode
+    if (quantCatalog && !quantCatalog.available && fusionVisible(mode)) {
+      for (const n of nodes) if ((n.data as YNodeData).quantized) bad.add(n.id);
+    }
+    return bad;
+  }, [nodes, quantCatalog, mode]);
+
   // mark the edges the block error blames (multi input/output tensors) + invalid fusion beams;
   // fusion edges already carry their own type and render as the beam
   const displayEdges = useMemo(() => {
@@ -78,15 +95,17 @@ function CanvasInner() {
     });
   }, [nodes, edges, blockStart, blockEnd, fusion]);
 
-  // flag nodes in an invalid fusion group red (via a wrapper class)
+  // flag red: nodes in an invalid fusion group, and quantized nodes the worker can't quantize
   const displayNodes = useMemo(() => {
-    if (fusion.badNodes.size === 0) return nodes;
-    return nodes.map((n) =>
-      fusion.badNodes.has(n.id)
-        ? { ...n, className: [n.className, "fuse-bad"].filter(Boolean).join(" ") }
-        : n,
-    );
-  }, [nodes, fusion]);
+    if (fusion.badNodes.size === 0 && quantBad.size === 0) return nodes;
+    return nodes.map((n) => {
+      const extra = [
+        fusion.badNodes.has(n.id) ? "fuse-bad" : "",
+        quantBad.has(n.id) ? "quant-bad" : "",
+      ].filter(Boolean);
+      return extra.length ? { ...n, className: [n.className, ...extra].filter(Boolean).join(" ") } : n;
+    });
+  }, [nodes, fusion, quantBad]);
 
   const { screenToFlowPosition } = useReactFlow();
   useCanvasShortcuts();

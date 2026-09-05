@@ -3,6 +3,7 @@
 import { type CSSProperties, type ReactNode, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Edge, Node } from "@xyflow/react";
+import { useTooltip } from "@/components/tooltipContext";
 import { api } from "@/lib/api";
 import { deriveFusionGroups, type FusionCatalog, matchFusionKernel } from "@/lib/fusion";
 import type { YNodeData } from "@/lib/graph";
@@ -11,6 +12,30 @@ import { structuralIds } from "@/lib/structuralId";
 import { useCanvasStore } from "@/store/canvasStore";
 import type { GraphMetaSchema } from "@/lib/types";
 import type { CanvasMode } from "@/store/canvasStore";
+
+// weights are quantized none -> W8 -> W4 -> none on each click of the quant button
+const QUANT_CYCLE: (string | null)[] = [null, "w8", "w4"];
+
+function QuantIcon() {
+  // "compress" glyph (arrows pulled inward) -> reduce weight precision
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="15 4 15 9 20 9" />
+      <polyline points="9 20 9 15 4 15" />
+      <line x1="15" y1="9" x2="21" y2="3" />
+      <line x1="3" y1="21" x2="9" y2="15" />
+    </svg>
+  );
+}
+
+function BracketIcon({ side }: { side: "start" | "end" }) {
+  const d = side === "start" ? "M16 4 H8 V20 H16" : "M8 4 H16 V20 H8";
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
 
 function Row({ label, children, mono }: { label: string; children: ReactNode; mono?: boolean }) {
   return (
@@ -105,6 +130,21 @@ function NodeProps({
   const category = CATEGORY_OF[d.type];
   const cat = category ? CATEGORY[category] : null;
 
+  const mode = useCanvasStore((s) => s.mode);
+  const setQuantized = useCanvasStore((s) => s.setQuantized);
+  const setBlockStart = useCanvasStore((s) => s.setBlockStart);
+  const setBlockEnd = useCanvasStore((s) => s.setBlockEnd);
+  const isStart = node.id === blockStart;
+  const isEnd = node.id === blockEnd;
+  // quantization is an inference-only weight transform, so only offer it in inference mode
+  const quantizable = (def?.quantizable ?? false) && mode === "inference";
+  const cycleQuant = () =>
+    setQuantized(node.id, QUANT_CYCLE[(QUANT_CYCLE.indexOf(d.quantized ?? null) + 1) % QUANT_CYCLE.length]);
+
+  const quantTip = useTooltip("Quantize weights (W8 / W4)");
+  const startTip = useTooltip(isStart ? "Clear block start" : "Set as block start");
+  const endTip = useTooltip(isEnd ? "Clear block end" : "Set as block end");
+
   const { data: catalog } = useQuery<FusionCatalog>({
     queryKey: ["fusion-available"],
     queryFn: api.fusionAvailable,
@@ -161,6 +201,37 @@ function NodeProps({
         <Row label="Quant" mono>
           {d.quantized ? d.quantized.toUpperCase() : "none"}
         </Row>
+      </div>
+      <div className="insp-actions">
+        {quantizable && (
+          <button
+            type="button"
+            className={`insp-act${d.quantized ? " on" : ""}`}
+            onClick={cycleQuant}
+            aria-label="Quantize weights"
+            {...quantTip}
+          >
+            {d.quantized ? <span className="insp-act-mode">{d.quantized.toUpperCase()}</span> : <QuantIcon />}
+          </button>
+        )}
+        <button
+          type="button"
+          className={`insp-act${isStart ? " on" : ""}`}
+          onClick={() => setBlockStart(isStart ? null : node.id)}
+          aria-label="Set as block start"
+          {...startTip}
+        >
+          <BracketIcon side="start" />
+        </button>
+        <button
+          type="button"
+          className={`insp-act${isEnd ? " on" : ""}`}
+          onClick={() => setBlockEnd(isEnd ? null : node.id)}
+          aria-label="Set as block end"
+          {...endTip}
+        >
+          <BracketIcon side="end" />
+        </button>
       </div>
     </section>
   );
