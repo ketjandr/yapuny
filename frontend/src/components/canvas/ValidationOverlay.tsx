@@ -94,7 +94,7 @@ const NO_PATH = "no complete path from graph input to output";
 
 function ValidationBody({ result, ids }: { result: ValidationResult; ids: Map<string, string> }) {
   if (result.valid && result.warnings.length === 0) {
-    return <div className="vrow vok">✓ graph valid</div>;
+    return <div className="vrow vok">✓ model valid</div>;
   }
   if (result.errors.includes(NO_PATH)) {
     return <div className="vrow verr">● {NO_PATH}</div>;

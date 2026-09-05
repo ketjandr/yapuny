@@ -152,7 +152,6 @@ function NumField({
 }
 
 function TrainSection({ expanded }: { expanded: boolean }) {
-  const markTrained = useCanvasStore((s) => s.markTrained);
   return (
     <section className="grp">
       <h3>Train</h3>
@@ -168,8 +167,9 @@ function TrainSection({ expanded }: { expanded: boolean }) {
           <HP label="batch" def="16" />
           <HP label="lr" def="3e-4" />
         </div>
-        {/* placeholder: no backend training yet — just flips the "trained" indicator */}
-        <button type="button" className="btn primary" onClick={markTrained}>
+        {/* placeholder: training isn't wired yet. "trained" is backend-driven (compile loads
+            saved weights from the locker); a real train run will POST /train/stream later. */}
+        <button type="button" className="btn primary">
           Train
         </button>
       </div>

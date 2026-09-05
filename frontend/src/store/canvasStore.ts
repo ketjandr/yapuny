@@ -69,7 +69,6 @@ function withPaste(s: CanvasState, newNodes: Node[], newEdges: Edge[]) {
   return {
     nodes: [...s.nodes.map((n) => ({ ...n, selected: false })), ...newNodes],
     edges: [...s.edges.map((e) => ({ ...e, selected: false })), ...newEdges],
-    needsCompile: true,
   };
 }
 
@@ -79,8 +78,7 @@ interface CanvasState {
   meta: GraphMetaSchema;
   mode: CanvasMode;
   selectedId: string | null;
-  needsCompile: boolean;
-  trained: boolean; // whether the current compiled graph has been trained (placeholder until wired)
+  modelId: string; // stable, frontend-minted id: the key into the backend model cache + weight locker
   lastCompiled: CompiledSnapshot | null; // snapshot taken at compile; target of revertToCompiled
   viewport: Viewport | null; // persisted pan/zoom, restored on reload
   saveStatus: "saving" | "saved"; // autosave indicator
@@ -106,7 +104,6 @@ interface CanvasState {
   setNLayer: (n: number) => void;
   setMeta: (patch: Partial<GraphMetaSchema>) => void;
   markCompiled: () => void;
-  markTrained: () => void;
   revertToCompiled: () => void;
   setMode: (mode: CanvasMode) => void;
   setViewport: (vp: Viewport) => void;
@@ -136,16 +133,17 @@ function rejectIfOccupied(edges: Edge[], conn: Connection, exceptId?: string): b
   return false;
 }
 
-// structural changes (vs cosmetic move/select)
-function nodesAreMeaningful(changes: NodeChange[]): boolean {
-  return changes.some((c) => c.type === "add" || c.type === "remove" || c.type === "replace");
-}
-function edgesAreMeaningful(changes: EdgeChange[]): boolean {
-  return changes.some((c) => c.type === "add" || c.type === "remove" || c.type === "replace");
-}
-
 // restore the last session from localStorage, else start from the seed graph
 const persisted = loadPersisted();
+
+// stable per-canvas id, minted once and persisted; the backend keys its model cache + locker by it
+function mintModelId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `m_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  }
+}
 
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   nodes: persisted?.nodes ?? seed.nodes,
@@ -153,8 +151,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   meta: persisted?.meta ?? DEFAULT_META,
   mode: persisted?.mode ?? "train", // editing/training is the default view
   selectedId: null,
-  needsCompile: persisted?.needsCompile ?? true, // a fresh (uncompiled) graph needs a compile
-  trained: persisted?.trained ?? false,
+  modelId: persisted?.modelId ?? mintModelId(),
   lastCompiled: persisted?.lastCompiled ?? null,
   viewport: persisted?.viewport ?? null,
   saveStatus: "saved",
@@ -162,17 +159,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   blockEnd: persisted?.blockEnd ?? null,
   clipboard: null,
 
-  onNodesChange: (changes) =>
-    set((s) => ({
-      nodes: applyNodeChanges(changes, s.nodes),
-      needsCompile: s.needsCompile || nodesAreMeaningful(changes),
-    })),
+  // needsCompile/trained are NOT tracked here — the backend (worker model cache + weight locker) is
+  // the source of truth, surfaced via compileStore. Edits just mutate the graph.
+  onNodesChange: (changes) => set((s) => ({ nodes: applyNodeChanges(changes, s.nodes) })),
 
-  onEdgesChange: (changes) =>
-    set((s) => ({
-      edges: applyEdgeChanges(changes, s.edges),
-      needsCompile: s.needsCompile || edgesAreMeaningful(changes),
-    })),
+  onEdgesChange: (changes) => set((s) => ({ edges: applyEdgeChanges(changes, s.edges) })),
 
   // each input (target) port accepts at most one edge; output ports may fan out.
   // a connection touching a fuse port is a (visual-only) fusion stream, handled separately.
@@ -206,7 +197,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       toast.error(err);
       return;
     }
-    set({ edges: next, needsCompile: true });
+    set({ edges: next });
   },
 
   onReconnect: (oldEdge, newConnection) => {
@@ -218,13 +209,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       toast.error(err);
       return;
     }
-    set({ edges: next, needsCompile: true });
+    set({ edges: next });
   },
 
   setSelected: (id) => set({ selectedId: id }),
 
-  addNode: (type, position) =>
-    set((s) => ({ nodes: [...s.nodes, makeNode(type, position)], needsCompile: true })),
+  addNode: (type, position) => set((s) => ({ nodes: [...s.nodes, makeNode(type, position)] })),
 
   // delete nodes (and their connected edges); pseudo-nodes (_input/_output) are protected
   removeNodes: (ids) => {
@@ -242,13 +232,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       blockStart: s.blockStart && del.has(s.blockStart) ? null : s.blockStart,
       blockEnd: s.blockEnd && del.has(s.blockEnd) ? null : s.blockEnd,
       selectedId: s.selectedId && del.has(s.selectedId) ? null : s.selectedId,
-      needsCompile: true,
     }));
   },
 
   removeEdges: (ids) => {
     const del = new Set(ids);
-    set((s) => ({ edges: s.edges.filter((e) => !del.has(e.id)), needsCompile: true }));
+    set((s) => ({ edges: s.edges.filter((e) => !del.has(e.id)) }));
   },
 
   // copy the nodes (pseudo-nodes excluded); an edge is included only if it was selected too
@@ -302,33 +291,30 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set((s) => withPaste(s, newNodes, newEdges));
   },
 
-  // block boundaries change what gets unrolled -> structural (weights invalidate on recompile)
-  setBlockStart: (id) => set({ blockStart: id, needsCompile: true }),
-  setBlockEnd: (id) => set({ blockEnd: id, needsCompile: true }),
-  clearBlock: () => set({ blockStart: null, blockEnd: null, needsCompile: true }),
+  // block boundaries change what gets unrolled -> structural (changes the compiled signature)
+  setBlockStart: (id) => set({ blockStart: id }),
+  setBlockEnd: (id) => set({ blockEnd: id }),
+  clearBlock: () => set({ blockStart: null, blockEnd: null }),
   // loop count; also structural (changes the unrolled depth)
   setNLayer: (n) =>
     set((s) => ({
       meta: { ...s.meta, n_layer: Math.min(N_LAYER_MAX, Math.max(N_LAYER_MIN, n)) },
-      needsCompile: true,
     })),
 
   // merge a config patch; smart constraint: n_embd is snapped to a multiple of n_head so the
-  // per-head dim stays an integer. Config changes are structural -> needsCompile.
+  // per-head dim stays an integer.
   setMeta: (patch) =>
     set((s) => {
       const m = { ...s.meta, ...patch };
       const head = Math.max(1, Math.round(m.n_head));
       const embd = Math.max(head, Math.round(m.n_embd / head) * head);
-      return { meta: { ...m, n_head: head, n_embd: embd }, needsCompile: true };
+      return { meta: { ...m, n_head: head, n_embd: embd } };
     }),
 
-  // compiling clears the dirty flag, snapshots the graph (for revert), and resets trained (a
-  // freshly compiled graph needs (re)training). Local-only for now; backend api.compile wires here.
+  // snapshot the graph locally so "revert to compiled" can restore it (positions and all). The
+  // compiled/trained STATUS is owned by the backend (compileStore), not recorded here.
   markCompiled: () =>
     set((s) => ({
-      needsCompile: false,
-      trained: false,
       lastCompiled: {
         nodes: cleanNodes(s.nodes),
         edges: cleanEdges(s.edges),
@@ -337,8 +323,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         blockEnd: s.blockEnd,
       },
     })),
-  markTrained: () => set({ trained: true }), // placeholder: flipped by the Train button for now
-  // restore the graph to the last compiled snapshot (discards uncompiled edits)
+  // restore the graph to the last compiled snapshot (discards uncompiled edits). The backend status
+  // (compileStore) will re-resolve to "compiled" once model_status re-checks the restored graph.
   revertToCompiled: () =>
     set((s) => {
       const c = s.lastCompiled;
@@ -349,8 +335,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         meta: c.meta,
         blockStart: c.blockStart,
         blockEnd: c.blockEnd,
-        needsCompile: false,
-        trained: false,
         selectedId: null,
       };
     }),
@@ -378,8 +362,7 @@ function persistableOf(s: CanvasState): PersistedCanvas {
     edges: cleanEdges(s.edges),
     meta: s.meta,
     mode: s.mode,
-    needsCompile: s.needsCompile,
-    trained: s.trained,
+    modelId: s.modelId,
     lastCompiled: s.lastCompiled,
     viewport: s.viewport,
     blockStart: s.blockStart,

@@ -18,8 +18,7 @@ export interface CompiledSnapshot {
 
 export interface PersistedCanvas extends CompiledSnapshot {
   mode: "train" | "inference";
-  needsCompile: boolean;
-  trained: boolean;
+  modelId: string; // stable id keying the backend model cache + weight locker
   lastCompiled: CompiledSnapshot | null;
   viewport: Viewport | null;
 }

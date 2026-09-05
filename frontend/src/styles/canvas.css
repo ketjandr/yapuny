@@ -411,33 +411,40 @@
   z-index: 6;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 5px 14px 5px 5px;
+  gap: 20px;
+  padding: 6px 12px;
   background: color-mix(in srgb, var(--panel) 90%, transparent);
   border: 1px solid var(--line2);
-  border-radius: 999px;
+  border-radius: 10px;
   backdrop-filter: blur(6px);
   box-shadow: 0 10px 26px -14px #000;
 }
 .compile-btn {
+  min-width: 108px; /* fixed so the bar/indicators don't shift between Compile / compiling… */
+  text-align: center;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   padding: 7px 18px;
-  border-radius: 999px;
-  color: var(--txt);
-  background: var(--ice-dim);
-  border: 1px solid var(--ice-dim);
+  border-radius: 7px;
+  color: #0a0c11;
+  background: #fff;
+  border: 1px solid #fff;
   cursor: pointer;
 }
 .compile-btn:hover:not(:disabled) {
-  background: var(--ice);
-  color: #04121a;
+  background: #e7eaf1;
+  border-color: #e7eaf1;
 }
-.compile-btn:disabled {
-  background: var(--panel);
-  border-color: var(--line2);
-  color: var(--muted);
+/* mid-compile: smaller font for the longer "compiling…" label, kept in the same fixed width */
+.compile-btn.compiling {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  opacity: 0.8;
+  cursor: default;
+}
+.compile-btn:disabled:not(.compiling) {
+  opacity: 0.45;
   cursor: default;
 }
 /* needs-compile / needs-train indicators with a glowing status dot */
@@ -448,6 +455,10 @@
   font-family: var(--mono);
   font-size: 11px;
   color: var(--txt2);
+}
+/* fixed-width (widest label) so toggling the text never reflows the bar */
+.ci-label {
+  display: inline-block;
 }
 .ci-dot {
   width: 8px;
