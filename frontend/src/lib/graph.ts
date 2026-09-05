@@ -1,7 +1,7 @@
 // Canvas nodes/edges <-> backend GraphRequest. Handle ids are the backend port names.
 import type { Edge, Node } from "@xyflow/react";
 import { DEFAULT_EDGES, DEFAULT_LAYOUT, INPUT_POS, OUTPUT_POS, type SeedEdge } from "./defaultGraph";
-import { FUSE_PORT, isFusionEdge } from "./fusion";
+import { FUSE_PORT, fusionGroupsForRequest, isFusionEdge } from "./fusion";
 import type { EdgeSchema, GraphMetaSchema, GraphRequest, NodeSchema } from "./types";
 
 export const RF_NODE_TYPE = "graph";
@@ -69,7 +69,12 @@ export function canvasToGraph(
       to_port: e.targetHandle ?? "x",
     }));
 
-  const graph: GraphRequest = { nodes: schemaNodes, edges: schemaEdges, fusion_groups: [], meta };
+  const graph: GraphRequest = {
+    nodes: schemaNodes,
+    edges: schemaEdges,
+    fusion_groups: fusionGroupsForRequest(edges),
+    meta,
+  };
   if (blockNodeIds?.length) graph.block = { nodes: blockNodeIds };
   return graph;
 }

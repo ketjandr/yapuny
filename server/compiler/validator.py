@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from server.compiler.fusion_registry import FUSION_BY_PATTERN, FusionDef
+from server.compiler.fusion_registry import FUSION_AVAILABLE, FUSION_BY_PATTERN, FusionDef
 from server.compiler.node_registry import NODE_REGISTRY
 from server.compiler.utils import flow_subgraph, output_cone
 from server.models.graph import GraphSpec
@@ -206,6 +206,13 @@ class GraphValidator:
 
     def _check_fusion_groups(self, graph: GraphSpec, errors: list[str]):
         if not graph.fusion_groups:
+            return
+
+        # no Triton fusion kernels on this worker (e.g. CPU-only, matching /fusion/available=false)
+        if not FUSION_AVAILABLE:
+            errors.append(
+                "fusion is not supported on this worker"
+            )
             return
 
         node_types = {n.id: n.type for n in graph.nodes}

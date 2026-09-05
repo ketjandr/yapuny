@@ -146,6 +146,13 @@ function orderByDataFlow(group: string[], dataEdges: Edge[]): string[] {
   return out.length === group.length ? out : group;
 }
 
+// The fusion groups to send in a GraphRequest: each connected component of fusion edges, its nodes
+// ordered by data flow so the backend can match the node-type pattern to a kernel.
+export function fusionGroupsForRequest(edges: Edge[]): { nodes: string[] }[] {
+  const dataEdges = edges.filter((e) => !isFusionEdge(e));
+  return deriveFusionGroups(edges).map((group) => ({ nodes: orderByDataFlow(group, dataEdges) }));
+}
+
 // each consecutive pair in the ordered group must be joined by a data edge (a contiguous chain)
 function isDataChain(ordered: string[], dataEdges: Edge[]): boolean {
   for (let i = 0; i < ordered.length - 1; i++) {
