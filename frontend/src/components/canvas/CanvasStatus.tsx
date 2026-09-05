@@ -1,10 +1,11 @@
 // Canvas status overlays, driven by the worker (source of truth):
 //  - SaveBar (bottom-left, by the validator): autosave "Saving…/Saved" chip + revert-to-compiled.
-//  - CompileBar (bottom-center): Compile button (calls the compile API, shows "compiling…") +
+//  - CompileBar (top-center): Compile button (calls the compile API, shows "compiling…") +
 //    "needs compile/compiled" and "needs train/trained" indicators with glowing dots.
 // model_status is polled (debounced) on every graph change so the indicators reflect the worker's
 // in-memory model cache; compile / status also report `trained` when weights load from the locker.
 import { useEffect } from "react";
+import { useTooltip } from "@/components/tooltipContext";
 import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvasStore";
 import { useCompileStore } from "@/store/compileStore";
@@ -64,27 +65,49 @@ function useModelStatusPoll() {
 
 export function SaveBar() {
   const saveStatus = useCanvasStore((s) => s.saveStatus);
-  const hasCompiled = useCanvasStore((s) => s.lastCompiled != null);
-  const revertToCompiled = useCanvasStore((s) => s.revertToCompiled);
-  const status = useCompileStore((s) => s.status);
   const saving = saveStatus === "saving";
-  // something to revert to, and the worker says the current graph isn't the compiled one
-  const canRevert = hasCompiled && status === "needs_compile";
 
   return (
     <div className="savebar">
       {/* mirrors the validation rows above it: same .vrow styling + check mark */}
       <div className={`vrow ${saving ? "vmuted" : "vok"}`}>{saving ? "saving…" : "✓ saved"}</div>
-      <button
-        type="button"
-        className="vrow revert-btn"
-        disabled={!canRevert}
-        onClick={revertToCompiled}
-        title="Revert the canvas to the last compiled graph"
-      >
-        ⟲ revert to compiled
-      </button>
     </div>
+  );
+}
+
+// Single icon button stacked above the zoom controls (bottom-left); reverts the canvas to the last
+// compiled graph. Disabled (dimmed) when there's nothing to revert to or the graph is already it.
+export function RevertTool() {
+  const hasCompiled = useCanvasStore((s) => s.lastCompiled != null);
+  const revertToCompiled = useCanvasStore((s) => s.revertToCompiled);
+  const status = useCompileStore((s) => s.status);
+  const canRevert = hasCompiled && status === "needs_compile";
+  const tip = useTooltip("Revert to last compiled model");
+
+  return (
+    <button
+      type="button"
+      className="revert-tool"
+      disabled={!canRevert}
+      onClick={revertToCompiled}
+      aria-label="Revert to last compiled model"
+      {...tip}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width="16"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <polyline points="1 4 1 10 7 10" />
+        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+      </svg>
+    </button>
   );
 }
 
@@ -110,8 +133,10 @@ export function CompileBar() {
   const title = invalid
     ? "Fix the graph errors before compiling"
     : compiled
-      ? "Graph is already compiled"
-      : "Compile the current graph";
+      ? "Model is already compiled"
+      : "Compile the current model";
+
+  const tip = useTooltip(title);
 
   const onCompile = async () => {
     if (compiling) return;
@@ -129,15 +154,17 @@ export function CompileBar() {
 
   return (
     <div className="compilebar">
-      <button
-        type="button"
-        className={`compile-btn${compiling ? " compiling" : ""}`}
-        disabled={disabled}
-        onClick={onCompile}
-        title={title}
-      >
-        {compiling ? "compiling…" : "Compile"}
-      </button>
+      {/* span carries the tooltip so the hint shows even while the button is disabled */}
+      <span className="compile-wrap" {...tip}>
+        <button
+          type="button"
+          className={`compile-btn${compiling ? " compiling" : ""}`}
+          disabled={disabled}
+          onClick={onCompile}
+        >
+          {compiling ? "compiling…" : "Compile"}
+        </button>
+      </span>
       <Indicator ok={compiled} okLabel="model compiled" needLabel="needs compile" />
       <Indicator ok={trainedOk} okLabel="model trained" needLabel="needs train" />
     </div>

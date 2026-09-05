@@ -22,7 +22,8 @@ import { ModeToggle } from "./ModeToggle";
 import { ContextMenu, type CanvasMenu } from "./ContextMenu";
 import { useCanvasShortcuts } from "./useCanvasShortcuts";
 import { ValidationOverlay } from "./ValidationOverlay";
-import { SaveBar, CompileBar } from "./CanvasStatus";
+import { SaveBar, CompileBar, RevertTool } from "./CanvasStatus";
+import { useTooltip } from "@/components/tooltipContext";
 import { useQuery } from "@tanstack/react-query";
 import { useCanvasStore } from "@/store/canvasStore";
 import { analyzeBlock } from "@/lib/block";
@@ -114,6 +115,7 @@ function CanvasInner() {
   const [menu, setMenu] = useState<CanvasMenu | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const [boxSelect, setBoxSelect] = useState(false);
+  const boxTip = useTooltip("Multi-select nodes and edges");
 
   const onNodeContextMenu = useCallback((e: React.MouseEvent, n: Node) => {
     e.preventDefault();
@@ -205,9 +207,10 @@ function CanvasInner() {
       <button
         type="button"
         className={`box-select${boxSelect ? " a" : ""}`}
-        title="Box select — drag to select nodes and edges"
+        aria-label="Multi-select nodes and edges"
         aria-pressed={boxSelect}
         onClick={() => setBoxSelect((v) => !v)}
+        {...boxTip}
       >
         <svg
           viewBox="0 0 24 24"
@@ -223,6 +226,7 @@ function CanvasInner() {
           <rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="4 3" />
         </svg>
       </button>
+      <RevertTool />
       <ModeToggle />
       <ValidationOverlay />
       <SaveBar />

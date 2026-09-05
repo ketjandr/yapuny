@@ -231,6 +231,9 @@
   transform: translate(-50%, -100%); /* left/top + scale set imperatively while shown */
   transform-origin: 50% 100%; /* scale about the bottom-center, pinned above the node */
   z-index: 1000;
+  /* size to content (capped by max-width) so a fixed element positioned near a screen edge doesn't
+     shrink-to-fit against the small remaining space and wrap a short label */
+  width: max-content;
   max-width: 250px;
   padding: 8px 11px;
   font-size: 12px;

@@ -111,7 +111,7 @@ function ValidationBody({
   const warnings = noPath ? [] : humanizeUnique(result.warnings, ids);
 
   if (errors.length === 0 && warnings.length === 0) {
-    return <div className="vrow vok">✓ graph valid</div>;
+    return <div className="vrow vok">✓ model valid</div>;
   }
 
   // fixed-size summary header (counts never grow); the detail list scrolls within a capped height,
