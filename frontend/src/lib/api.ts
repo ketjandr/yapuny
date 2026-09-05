@@ -24,8 +24,12 @@ export const api = {
   fusionAvailable: () => fetch("/api/fusion/available").then(j),
   quantizationAvailable: () => fetch("/api/quantization/available").then(j),
 
+  trainStop: () => post("/train/stop", {}).then(j),
+  trainStatus: () => fetch("/api/train/status").then(j),
+
   // streaming endpoints return the raw Response; read with lib/sse.ts
   trainStream: (req: TrainRequest) => post("/train/stream", req),
+  trainFollow: () => fetch("/api/train/follow"), // reattach to an in-progress run (no start)
   generateStream: (req: GenerateRequest) => post("/generate/stream", req),
   benchStream: (req: BenchRunRequest) => post("/bench/generate", req),
 

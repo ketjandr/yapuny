@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 
 import torch
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile
+from fastapi import APIRouter, HTTPException, UploadFile
 from starlette.responses import StreamingResponse
 
 from server.api.schemas import (
@@ -248,53 +249,71 @@ def decode_tokens(request: DecodeRequest):
 # -- Train --
 
 
-def _start_train(request: TrainRequest, background_tasks: BackgroundTasks):
+def _start_train(request: TrainRequest):
     if request.id not in worker.cache:
         raise HTTPException(status_code=400, detail="model not compiled - compile first")
     if worker.training:
         raise HTTPException(status_code=409, detail="training already in progress")
 
-    background_tasks.add_task(
-        worker.train,
-        request.id,
-        max_steps=request.max_steps,
-        batch_size=request.batch_size,
-        learning_rate=request.learning_rate,
-        eval_interval=request.eval_interval,
-        eval_iters=request.eval_iters,
-        bench=request.bench,
-    )
+    # seed a fresh running state before streaming so the SSE loop neither spins on a None state nor
+    # replays a previous run's terminal frame; the worker overwrites this once it starts stepping
+    worker.train_state = {
+        "step": 0,
+        "max_steps": request.max_steps,
+        "train_loss": None,
+        "status": "running",
+    }
+
+    # run training in a thread, NOT a Starlette BackgroundTask: background tasks run only after the
+    # response body finishes, which for a StreamingResponse is after the SSE generator returns - and
+    # that generator waits for this very training to finish, so a background task would deadlock.
+    threading.Thread(
+        target=worker.train,
+        args=(request.id,),
+        kwargs=dict(
+            max_steps=request.max_steps,
+            batch_size=request.batch_size,
+            learning_rate=request.learning_rate,
+            bench=request.bench,
+        ),
+        daemon=True,
+    ).start()
 
 
 @router.post("/train", tags=["train"])
-def train(request: TrainRequest, background_tasks: BackgroundTasks):
-    _start_train(request, background_tasks)
+def train(request: TrainRequest):
+    _start_train(request)
     return {"status": "started", "max_steps": request.max_steps}
 
 
+# stream train_state updates until the run reaches a terminal status. Shared by /train/stream (which
+# starts a run first) and /train/follow (which only attaches, e.g. after a page reload).
+def _train_event_stream():
+    prev = None
+    while True:
+        state = worker.train_state
+        if state is None:
+            return  # nothing (more) to follow
+        serialized = json.dumps(state)
+        if serialized != prev:
+            prev = serialized
+            yield f"event: update\ndata: {serialized}\n\n"
+        if state.get("status") in ("completed", "stopped", "error"):
+            return
+        time.sleep(0.25)
+
+
 @router.post("/train/stream", tags=["train"])
-def train_stream(request: TrainRequest, background_tasks: BackgroundTasks):
-    _start_train(request, background_tasks)
+def train_stream(request: TrainRequest):
+    _start_train(request)  # seeds a running train_state, so the stream never sees None
+    return StreamingResponse(_train_event_stream(), media_type="text/event-stream")
 
-    def event_stream():
-        prev = None
-        while True:
-            state = worker.train_state
-            if state is None:
-                time.sleep(0.05)
-                continue
 
-            serialized = json.dumps(state)
-            if serialized != prev:
-                prev = serialized
-                yield f"event: update\ndata: {serialized}\n\n"
-
-            if state.get("status") in ("completed", "stopped", "error"):
-                return
-
-            time.sleep(0.25)
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+@router.get("/train/follow", tags=["train"])
+def train_follow():
+    # reattach to a run already in progress (started by another client / a since-reloaded page).
+    # Does NOT start training - if nothing is running the stream just closes immediately.
+    return StreamingResponse(_train_event_stream(), media_type="text/event-stream")
 
 
 @router.get("/train/status", tags=["train"])

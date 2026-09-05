@@ -50,8 +50,6 @@ export interface TrainRequest {
   max_steps?: number;
   batch_size?: number;
   learning_rate?: number;
-  eval_interval?: number;
-  eval_iters?: number;
   bench?: boolean;
 }
 export interface BenchRunRequest {

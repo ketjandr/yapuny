@@ -1,7 +1,9 @@
 // Canvas nodes/edges <-> backend GraphRequest. Handle ids are the backend port names.
 import type { Edge, Node } from "@xyflow/react";
+import { analyzeBlock } from "./block";
 import { DEFAULT_EDGES, DEFAULT_LAYOUT, INPUT_POS, OUTPUT_POS, type SeedEdge } from "./defaultGraph";
 import { FUSE_PORT, fusionGroupsForRequest, isFusionEdge } from "./fusion";
+import { loadCanvas } from "./persist";
 import type { EdgeSchema, GraphMetaSchema, GraphRequest, NodeSchema } from "./types";
 
 export const RF_NODE_TYPE = "graph";
@@ -88,6 +90,15 @@ export function canvasToGraph(
   };
   if (blockNodeIds?.length) graph.block = { nodes: blockNodeIds };
   return graph;
+}
+
+// A saved project's canvas -> GraphRequest, mirroring canvasStore.toGraph (block emitted only when
+// it's a valid loopable slice). Used by the benchmark compare to build other projects' graphs.
+export function graphForProject(id: string): GraphRequest | null {
+  const c = loadCanvas(id);
+  if (!c) return null;
+  const block = analyzeBlock(c.nodes, c.edges, c.blockStart, c.blockEnd);
+  return canvasToGraph(c.nodes, c.edges, c.meta, block.valid ? [...block.nodeIds] : undefined);
 }
 
 // GraphRequest -> canvas, grid-laid out (no positions in the schema); for loading saved models

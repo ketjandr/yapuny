@@ -70,8 +70,6 @@ class TrainRequest(BaseSchema):
     max_steps: int = 2000
     batch_size: int = 32
     learning_rate: float = 3e-4
-    eval_interval: int = 200
-    eval_iters: int = 50
     bench: bool = False
 
 

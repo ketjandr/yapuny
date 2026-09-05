@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import statistics
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -185,32 +184,31 @@ class Worker:
         max_steps: int = 2000,
         batch_size: int = 32,
         learning_rate: float = 3e-4,
-        eval_interval: int = 200,
-        eval_iters: int = 50,
         bench: bool = False,
     ):
+        # guards set an error train_state (not just return) so /train/stream, which polls
+        # train_state, sees a terminal status and ends instead of hanging on a run that never began
+        def _fail(msg: str):
+            self.train_state = {"status": "error", "error": msg}
+            return self.train_state
+
         entry = self.cache.get(model_id)
         if entry is None:
-            return {"error": "model not compiled - compile first"}
+            return _fail("model not compiled - compile first")
 
         if self.training:
-            return {"error": "training already in progress"}
+            return _fail("training already in progress")
 
         if not TOKENIZER_PATH.exists() or not (DATA_DIR / "train.bin").exists():
-            return {"error": "no data prepared - upload a corpus and prepare data first"}
+            return _fail("no data prepared - upload a corpus and prepare data first")
 
         # fusion/quantization are inference-only (currently their kernels have no backward)
         # so training runs on the stripped "plain" graph
+        # every run trains from a fresh init - we never resume/continue prior weights. The existing
+        # locker weights (if any) are left untouched until this run succeeds and overwrites them.
         has_opts = has_inference_opts(entry.graph)
-        if has_opts:
-            plain_graph = strip_inference_opts(entry.graph)
-            pkg = store.load(model_id)
-            match = pkg is not None and pkg.structure_hash == entry.structure_hash
-            pretrained = pkg.weights if match else None
-            model = self.compiler.compile(plain_graph, pretrained_state=pretrained).to(self.device)
-        else:
-            plain_graph = entry.graph
-            model = entry.model
+        plain_graph = strip_inference_opts(entry.graph) if has_opts else entry.graph
+        model = self.compiler.compile(plain_graph).to(self.device)
 
         block_size = model.meta["block_size"]
         model.train()
@@ -229,25 +227,12 @@ class Worker:
         if bench:
             fwd_times: list[float] = []
             bwd_times: list[float] = []
-            if self.device.type == "cuda":
-                torch.cuda.reset_peak_memory_stats(self.device)
 
         try:
             for step in range(max_steps):
                 if not self.training:
                     self.train_state["status"] = "stopped"
                     break
-
-                # eval
-                if step % eval_interval == 0:
-                    losses = self._estimate_loss(model, block_size, batch_size, eval_iters)
-                    self.train_state.update(
-                        {
-                            "step": step,
-                            "train_loss": losses["train"],
-                            "val_loss": losses["val"],
-                        }
-                    )
 
                 # train step
                 x, y = self._get_batch("train", block_size, batch_size)
@@ -268,6 +253,10 @@ class Worker:
 
                 optimizer.step()
 
+                # stream progress every step: the per-step train loss + step counter
+                self.train_state["step"] = step + 1
+                self.train_state["train_loss"] = loss.item()
+
                 if bench:
                     fwd_times.append((t_fwd - t0) * 1000)
                     bwd_times.append((t_bwd - t_fwd) * 1000)
@@ -276,60 +265,44 @@ class Worker:
                         "steps_per_sec": 1000.0 / (sum(recent) / len(recent)),
                     }
 
-            self.train_state["step"] = max_steps
-            self.train_state["status"] = "completed"
+            # only a full run marks completion; a stopped run keeps its "stopped" status and the
+            # step it reached. The save below is gated on this, so a stopped run never persists.
+            stopped = self.train_state["status"] == "stopped"
+            if not stopped:
+                self.train_state["step"] = max_steps
+                self.train_state["status"] = "completed"
 
-            # final eval
-            losses = self._estimate_loss(model, block_size, batch_size, eval_iters)
-            self.train_state["train_loss"] = losses["train"]
-            self.train_state["val_loss"] = losses["val"]
+            # persist ONLY on a successful full run - a stopped run leaves any existing locker
+            # weights untouched (we never overwrite good weights with a partial/aborted run)
+            if not stopped:
+                # commit the trained (plain fp32, unfused) weights to the locker
+                unfused = self._unfused_state(model, plain_graph)
+                tokenizer = load_tokenizer(TOKENIZER_PATH)
+                store.save(model_id, tokenizer, unfused, entry.structure_hash)
 
-            if bench and fwd_times:
-                from dataclasses import asdict
+                # refresh the cache so inference is ready with no user recompile
+                if has_opts:
+                    inference_model = self.compiler.compile(entry.graph, pretrained_state=unfused)
+                    inference_model.to(self.device)
+                    inference_model.eval()
+                    self.cache[model_id] = ModelCacheEntry(
+                        entry.full_hash,
+                        entry.structure_hash,
+                        entry.graph,
+                        inference_model,
+                        tokenizer,
+                    )
+                else:
+                    # no opts: the freshly trained model IS the inference model, so point the cache
+                    # entry at it (we trained a new object, not entry.model in place)
+                    entry.model = model
+                    entry.tokenizer = tokenizer
+                self.train_state["saved"] = model_id
 
-                from worker.bench import _timing_result, profile_graph
-
-                step_times = [f + b for f, b in zip(fwd_times, bwd_times)]
-                median_step = statistics.median(step_times)
-                peak_vram = None
-                if self.device.type == "cuda":
-                    peak_vram = torch.cuda.max_memory_allocated(self.device) / (1024 * 1024)
-
-                profile = profile_graph(
-                    model=model,
-                    device=self.device,
-                    mode="train",
-                    warmup=1,
-                )
-
-                self.train_state["bench"] = {
-                    "forward_ms": asdict(_timing_result(fwd_times)),
-                    "backward_ms": asdict(_timing_result(bwd_times)),
-                    "steps_per_sec": 1000.0 / median_step if median_step > 0 else 0,
-                    "peak_vram_mb": peak_vram,
-                    "profile": {
-                        "nodes": [asdict(n) for n in profile.nodes],
-                        "total_us": profile.total_us,
-                    },
-                }
-
-            # commit the trained (plain fp32, unfused) weights to the locker
-            unfused = self._unfused_state(model, plain_graph)
-            tokenizer = load_tokenizer(TOKENIZER_PATH)
-            store.save(model_id, tokenizer, unfused, entry.structure_hash)
-
-            # refresh the cache so inference is ready with no user recompile
-            if has_opts:
-                inference_model = self.compiler.compile(entry.graph, pretrained_state=unfused)
-                inference_model.to(self.device)
-                inference_model.eval()
-                self.cache[model_id] = ModelCacheEntry(
-                    entry.full_hash, entry.structure_hash, entry.graph, inference_model, tokenizer
-                )
-            else:
-                entry.tokenizer = tokenizer
-            self.train_state["saved"] = model_id
-
+        except Exception as e:
+            # surface the failure as a terminal state so the stream ends instead of hanging
+            self.train_state["status"] = "error"
+            self.train_state["error"] = str(e)
         finally:
             self.training = False
             self.training_id = None
@@ -344,9 +317,11 @@ class Worker:
         return {"status": "stopping"}
 
     def get_train_status(self):
+        # training_id lets the frontend tell whether an in-progress run is for the model it has open
+        # (so it can reattach to the live stream after a reload); it clears when a run ends
         if self.train_state is None:
-            return {"status": "idle"}
-        return self.train_state
+            return {"status": "idle", "training_id": None}
+        return {**self.train_state, "training_id": self.training_id}
 
     def _unfused_state(self, model, graph: GraphSpec) -> dict:
         """Return trained weights in unfused form so any graph variant can reload them.
@@ -403,20 +378,6 @@ class Worker:
             [torch.from_numpy(data[i + 1 : i + 1 + block_size].astype(np.int64)) for i in ix]
         )
         return x.to(self.device), y.to(self.device)
-
-    @torch.no_grad()
-    def _estimate_loss(self, model, block_size: int, batch_size: int, eval_iters: int):
-        model.eval()
-        out = {}
-        for split in ["train", "val"]:
-            losses = torch.zeros(eval_iters)
-            for i in range(eval_iters):
-                x, y = self._get_batch(split, block_size, batch_size)
-                _, loss, _ = model(x, y)
-                losses[i] = loss.item()
-            out[split] = losses.mean().item()
-        model.train()
-        return out
 
     def _sample(self, logits, temperature, top_k):
         logits = logits[:, -1, :] / temperature

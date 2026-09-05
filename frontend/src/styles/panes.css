@@ -352,6 +352,13 @@
   border-color: var(--ice-dim);
   color: var(--txt);
 }
+/* wrapper carries a tooltip while the button is disabled; keep the button full-width as before */
+.btn-wrap {
+  display: flex;
+}
+.btn-wrap .btn {
+  flex: 1;
+}
 .btn.primary:hover {
   background: var(--ice);
   color: #04121a;
@@ -395,7 +402,7 @@
   background: var(--ice);
 }
 
-/* loss graph placeholder */
+/* loss graph */
 .loss-graph {
   width: 100%;
   display: block;
@@ -458,4 +465,152 @@
   display: block;
   height: 100%;
   background: var(--ice);
+}
+.bb-sub {
+  flex: 0 0 34px;
+  text-align: right;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+/* stop button (danger) + small inline action button */
+.btn.danger {
+  background: transparent;
+  border-color: var(--red);
+  color: var(--red);
+}
+.btn.danger:hover {
+  background: var(--red);
+  color: #150609;
+}
+.btn.tiny {
+  padding: 4px 9px;
+  font-size: 10px;
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* short status line under a run's controls */
+.run-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+.run-note.ok {
+  color: var(--green);
+}
+.run-note.bad {
+  color: var(--red);
+}
+
+/* benchmark: profiler + compare share a block with a titled header row */
+.bench-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+.bench-block + .bench-block {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.bench-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.bench-sub {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--txt2);
+}
+.bench-empty {
+  font-size: 11px;
+  color: var(--faint);
+}
+
+/* compare: prompt, model chips, results table */
+.cmp-prompt {
+  width: 100%;
+}
+.cmp-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: var(--panel);
+  color: var(--txt2);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip:hover {
+  border-color: var(--line3);
+}
+.chip.on {
+  border-color: var(--ice-dim);
+  background: var(--ice-dim);
+  color: var(--txt);
+}
+.chip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.cmp-scroll {
+  overflow-x: auto;
+}
+.cmp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.cmp-table th,
+.cmp-table td {
+  padding: 5px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  color: var(--txt);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cmp-table th {
+  color: var(--txt2);
+  font-weight: 500;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cmp-table th:first-child,
+.cmp-table .cmp-k {
+  text-align: left;
+  color: var(--faint);
+}
+.cmp-table .cmp-best {
+  color: var(--ice);
+}
+.cmp-sample {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+.cmp-sample-k {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+}
+.cmp-sample-v {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
