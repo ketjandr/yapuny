@@ -57,14 +57,15 @@ export const TEMPLATES: Template[] = [
 
 // build the initial persisted canvas for a template
 export function templateCanvas(key: TemplateKey): PersistedCanvas {
-  const { nodes, edges } = key === "unfused" ? seedToCanvas() : blankToCanvas();
+  const unfused = key === "unfused";
+  const { nodes, edges } = unfused ? seedToCanvas() : blankToCanvas();
   return {
     nodes: cleanNodes(nodes),
     edges: cleanEdges(edges),
     meta: DEFAULT_META,
     mode: "train",
-    blockStart: null,
-    blockEnd: null,
+    blockStart: unfused ? "ln1" : null,
+    blockEnd: unfused ? "res2" : null,
     lastCompiled: null,
     viewport: null,
   };
