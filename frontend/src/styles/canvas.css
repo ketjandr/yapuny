@@ -445,7 +445,9 @@
 }
 .block-err {
   position: absolute;
-  bottom: -13px;
+  /* anchor by top (at the same spot the single line sat) so extra wrapped lines grow downward,
+     away from the block, instead of upward into the node */
+  top: calc(100% - 6px);
   left: 16px;
   padding: 3px 9px;
   background: var(--panel);
@@ -454,7 +456,11 @@
   font-family: var(--mono);
   font-size: 11px;
   color: var(--red);
-  white-space: nowrap;
+  /* size to content, but never past the block width: a short message stays one line at the left,
+     an over-long one clamps to the block, wraps (grows down) and centers instead of overflowing */
+  width: max-content;
+  max-width: calc(100% - 32px);
+  text-align: center;
   pointer-events: auto;
 }
 .block-clear {

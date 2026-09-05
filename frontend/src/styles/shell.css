@@ -139,7 +139,10 @@
 .insp-row {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  /* center (not baseline) + fixed min-height: keeps rows metric-stable so the label doesn't shift
+     when a value switches font/size between the unselected (sans dash) and selected (mono) states */
+  align-items: center;
+  min-height: 18px;
   gap: 12px;
 }
 .insp-k {
@@ -147,7 +150,7 @@
   font-size: 10.5px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: var(--muted);
 }
 .insp-v {
   text-align: right;
