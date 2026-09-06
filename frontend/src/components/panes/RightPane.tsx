@@ -279,21 +279,26 @@ function useCompareInfos(entries: CompareEntry[], trigger: string): Record<strin
 function ConfigSection({ expanded }: { expanded: boolean }) {
   const meta = useCanvasStore((s) => s.meta);
   const setMeta = useCanvasStore((s) => s.setMeta);
-  const snapEmbd = (n: number) => Math.max(meta.n_head, Math.round(n / meta.n_head) * meta.n_head);
+  // head_dim (= n_embd / n_head) must be even - RoPE rotates dimension pairs, so an odd head_dim
+  // breaks it. Keep n_embd a multiple of 2*n_head so head_dim is always an even integer.
+  const embdUnit = (h: number) => 2 * h;
+  const snapTo = (n: number, unit: number) => Math.max(unit, Math.round(n / unit) * unit);
+  const snapEmbd = (n: number) => snapTo(n, embdUnit(meta.n_head));
   return (
     <section className="grp">
       <h3>Config</h3>
       <div className={`cfg${expanded ? " grid2" : ""}`}>
         <CfgSlider label="n_layer" help="Transformer blocks stacked in a row, each refining the model's understanding. How many times the canvas block repeats." value={meta.n_layer} min={N_LAYER_MIN} max={N_LAYER_MAX} step={1} onChange={(v) => setMeta({ n_layer: v })} />
-        <CfgSlider label="n_head" help="Attention heads per block. Each spots a different relationship between tokens - grammar, meaning, position." value={meta.n_head} min={1} max={16} step={1} onChange={(v) => setMeta({ n_head: v })} />
+        {/* changing n_head re-snaps n_embd so head_dim stays an even integer */}
+        <CfgSlider label="n_head" help="Attention heads per block. Each spots a different relationship between tokens - grammar, meaning, position." value={meta.n_head} min={1} max={16} step={1} onChange={(v) => setMeta({ n_head: v, n_embd: snapTo(meta.n_embd, embdUnit(v)) })} />
         <CfgSlider
           label="n_embd"
           help="How much information each token carries through the model - wider holds more nuance."
           hint={`head_dim ${Math.floor(meta.n_embd / meta.n_head)}`}
           value={meta.n_embd}
-          min={meta.n_head}
+          min={embdUnit(meta.n_head)}
           max={1024}
-          step={meta.n_head}
+          step={embdUnit(meta.n_head)}
           snap={snapEmbd}
           onChange={(v) => setMeta({ n_embd: v })}
         />
