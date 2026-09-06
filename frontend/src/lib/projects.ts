@@ -15,7 +15,7 @@ export interface Project {
 
 const PROJECTS_KEY = "yapuny.projects.v1";
 
-export const TITLE_MAX = 48; // model title character limit (shared by the navbar + projects page)
+export const TITLE_MAX = 24; // model title character limit (shared by the navbar + projects page)
 
 export function newProjectId(): string {
   try {

@@ -21,6 +21,7 @@ export interface PersistedCanvas extends CompiledSnapshot {
   mode: "train" | "inference";
   lastCompiled: CompiledSnapshot | null;
   viewport: Viewport | null;
+  benchOpen?: { train: boolean; inference: boolean }; // benchmark section toggle, per mode
 }
 
 // reset transient flags so selection/drag state neither triggers a save nor persists

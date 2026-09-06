@@ -4,6 +4,7 @@
 // update, which ends the stream here - we never tear the socket down mid-step.
 import { create } from "zustand";
 import { api } from "@/lib/api";
+import { reconnectToBusyRun } from "@/lib/runReconnect";
 import { readSSE } from "@/lib/sse";
 import type { TrainRequest } from "@/lib/types";
 import { toast } from "@/store/toastStore";
@@ -24,6 +25,7 @@ interface TrainState {
   loss: number | null; // latest per-step train loss (headline stat)
   stepsPerSec: number | null; // live steps/s (rolling), streamed per step when bench is on
   curve: StepLoss[]; // dense per-step train loss (the whole curve)
+  phase: "tokenizing" | "training" | null; // the model trains its own tokenizer before stepping
   error: string | null;
   start: (req: TrainRequest) => Promise<void>;
   follow: (id: string) => Promise<void>; // reattach to an in-progress run after a reload
@@ -38,6 +40,7 @@ const IDLE = {
   loss: null,
   stepsPerSec: null,
   curve: [] as StepLoss[],
+  phase: null as "tokenizing" | "training" | null,
   error: null as string | null,
 };
 
@@ -55,18 +58,17 @@ export const useTrainStore = create<TrainState>((set, get) => {
         sawFrame = true;
         const d = ev.data;
         set((s) => {
-          // append the per-step train loss once per new step (the stream ticks every step)
-          const curve = s.curve;
-          const nextCurve =
-            d.train_loss != null && (curve.length === 0 || curve[curve.length - 1].step !== d.step)
-              ? [...curve, { step: d.step ?? 0, loss: d.train_loss }]
-              : curve;
+          // curve is server-authoritative (downsampled [step, loss]) so it survives a reload
+          const curve: StepLoss[] = d.curve
+            ? d.curve.map(([step, loss]: [number, number]) => ({ step, loss }))
+            : s.curve;
           return {
             step: d.step ?? s.step,
             maxSteps: d.max_steps ?? s.maxSteps, // follow learns maxSteps from the frames
             loss: d.train_loss ?? s.loss,
-            stepsPerSec: d.bench?.steps_per_sec ?? s.stepsPerSec,
-            curve: nextCurve,
+            stepsPerSec: d.steps_per_sec ?? s.stepsPerSec,
+            phase: d.phase ?? s.phase,
+            curve,
             status: mapStatus(d.status),
             error: d.status === "error" ? (d.error ?? "training failed") : s.error,
           };
@@ -111,13 +113,8 @@ export const useTrainStore = create<TrainState>((set, get) => {
           .catch(() => undefined);
         set({ ...IDLE, modelId: null });
         toast.error(`Couldn't start training: ${detail ?? `${res.status} ${res.statusText}`}`);
-        // reflect whatever run is actually in progress so this tab's Train button disables
-        api
-          .trainStatus()
-          .then((s) => {
-            if (s?.status === "running" && s.training_id) get().follow(s.training_id);
-          })
-          .catch(() => {});
+        // reflect whatever run (single or bench) is in progress so this tab's Train button disables
+        reconnectToBusyRun();
         return;
       }
       await consume(res);

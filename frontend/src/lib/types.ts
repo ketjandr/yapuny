@@ -52,6 +52,12 @@ export interface TrainRequest {
   learning_rate?: number;
   bench?: boolean;
 }
+export interface TrainBenchRequest {
+  model_ids: string[]; // up to 5 compiled models, trained sequentially
+  max_steps?: number;
+  batch_size?: number;
+  learning_rate?: number;
+}
 export interface BenchRunRequest {
   graphs: ModelGraphRequest[];
   prompt: string;

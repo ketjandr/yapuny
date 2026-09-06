@@ -16,6 +16,7 @@ from server.api.schemas import (
     ModelGraphRequest,
     PrepareDataRequest,
     ProfileRequest,
+    TrainBenchRequest,
     TrainRequest,
 )
 from worker.worker import Worker
@@ -264,9 +265,6 @@ def _start_train(request: TrainRequest):
         "status": "running",
     }
 
-    # run training in a thread, NOT a Starlette BackgroundTask: background tasks run only after the
-    # response body finishes, which for a StreamingResponse is after the SSE generator returns - and
-    # that generator waits for this very training to finish, so a background task would deadlock.
     threading.Thread(
         target=worker.train,
         args=(request.id,),
@@ -286,12 +284,13 @@ def train(request: TrainRequest):
     return {"status": "started", "max_steps": request.max_steps}
 
 
-# stream train_state updates until the run reaches a terminal status. Shared by /train/stream (which
-# starts a run first) and /train/follow (which only attaches, e.g. after a page reload).
-def _train_event_stream():
+# poll a run's state dict and stream it as SSE `update` frames until it reaches a terminal status.
+# `get_state` returns the current dict (or None when there's nothing to follow). Shared by the
+# single (train_state) and multi-model bench (bench_state) runs, and their start + follow endpoints.
+def _poll_state_stream(get_state):
     prev = None
     while True:
-        state = worker.train_state
+        state = get_state()
         if state is None:
             return  # nothing (more) to follow
         serialized = json.dumps(state)
@@ -303,22 +302,73 @@ def _train_event_stream():
         time.sleep(0.25)
 
 
+def _train_stream_resp():
+    stream = _poll_state_stream(lambda: worker.train_state)
+    return StreamingResponse(stream, media_type="text/event-stream")
+
+
+def _bench_stream_resp():
+    stream = _poll_state_stream(lambda: worker.bench_state)
+    return StreamingResponse(stream, media_type="text/event-stream")
+
+
 @router.post("/train/stream", tags=["train"])
 def train_stream(request: TrainRequest):
     _start_train(request)  # seeds a running train_state, so the stream never sees None
-    return StreamingResponse(_train_event_stream(), media_type="text/event-stream")
+    return _train_stream_resp()
 
 
 @router.get("/train/follow", tags=["train"])
 def train_follow():
     # reattach to a run already in progress (started by another client / a since-reloaded page).
     # Does NOT start training - if nothing is running the stream just closes immediately.
-    return StreamingResponse(_train_event_stream(), media_type="text/event-stream")
+    return _train_stream_resp()
 
 
 @router.get("/train/status", tags=["train"])
 def train_status():
     return worker.get_train_status()
+
+
+@router.post("/train/bench", tags=["train"])
+def train_bench(request: TrainBenchRequest):
+    if worker.training:
+        raise HTTPException(status_code=409, detail="training already in progress")
+    for mid in request.model_ids:
+        if mid not in worker.cache:
+            raise HTTPException(status_code=400, detail="compile all selected models first")
+
+    # seed a running bench_state before streaming so the poller never sees None or a stale run
+    worker.bench_state = {
+        "status": "running",
+        "current": 0,
+        "models": [
+            {"id": mid, "status": "pending", "step": 0, "max_steps": request.max_steps,
+             "train_loss": None, "steps_per_sec": None, "bench": None}
+            for mid in request.model_ids
+        ],
+    }
+    threading.Thread(
+        target=worker.train_bench,
+        args=(request.model_ids,),
+        kwargs=dict(
+            max_steps=request.max_steps,
+            batch_size=request.batch_size,
+            learning_rate=request.learning_rate,
+        ),
+        daemon=True,
+    ).start()
+    return _bench_stream_resp()
+
+
+@router.get("/train/bench/follow", tags=["train"])
+def train_bench_follow():
+    return _bench_stream_resp()
+
+
+@router.get("/train/bench/status", tags=["train"])
+def train_bench_status():
+    return worker.get_bench_status()
 
 
 @router.post("/train/stop", tags=["train"])

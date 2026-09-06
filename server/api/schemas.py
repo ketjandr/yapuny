@@ -73,6 +73,14 @@ class TrainRequest(BaseSchema):
     bench: bool = False
 
 
+# sequential multi-model training benchmark: trains each already-compiled model in turn
+class TrainBenchRequest(BaseSchema):
+    model_ids: list[str] = Field(min_length=1, max_length=5)
+    max_steps: int = 500
+    batch_size: int = 16
+    learning_rate: float = 3e-4
+
+
 # -- Generate --
 
 

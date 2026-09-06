@@ -11,7 +11,6 @@ from tokenizers import Tokenizer
 from data.tokenizer import (
     decode,
     encode,
-    load_tokenizer,
     save_tokenizer,
     train_tokenizer,
 )
@@ -30,6 +29,21 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 RAW_DIR = DATA_DIR / "raw"
 TOKENIZER_PATH = DATA_DIR / "yapuny_tokenizer.json"
 MAX_CORPUS_BYTES = 10 * 1024 * 1024  # 10 MB cap
+
+
+def _bench_slot(model_id: str, max_steps: int) -> dict:
+    """A per-model progress slot in a benchmark run's streamed state."""
+    return {
+        "id": model_id,
+        "status": "pending",
+        "phase": None,  # "tokenizing" | "training" while this model is the current one
+        "step": 0,
+        "max_steps": max_steps,
+        "train_loss": None,
+        "steps_per_sec": None,
+        "curve": [],  # downsampled [step, loss] history, so a reload keeps the graph
+        "bench": None,
+    }
 
 
 @dataclass
@@ -53,7 +67,8 @@ class Worker:
         self.cache: dict[str, ModelCacheEntry] = {}
         self.training = False
         self.training_id = None
-        self.train_state = None
+        self.train_state = None  # single-model run (POST /train/stream)
+        self.bench_state = None  # multi-model benchmark run (POST /train/bench)
 
     def upload_corpus(self, content: bytes, filename: str):
         if len(content) > MAX_CORPUS_BYTES:
@@ -199,106 +214,43 @@ class Worker:
         if self.training:
             return _fail("training already in progress")
 
-        if not TOKENIZER_PATH.exists() or not (DATA_DIR / "train.bin").exists():
-            return _fail("no data prepared - upload a corpus and prepare data first")
+        if not (RAW_DIR / "corpus.txt").exists():
+            return _fail("no corpus - upload a corpus first")
 
-        # fusion/quantization are inference-only (currently their kernels have no backward)
-        # so training runs on the stripped "plain" graph
-        # every run trains from a fresh init - we never resume/continue prior weights. The existing
-        # locker weights (if any) are left untouched until this run succeeds and overwrites them.
-        has_opts = has_inference_opts(entry.graph)
-        plain_graph = strip_inference_opts(entry.graph) if has_opts else entry.graph
-        model = self.compiler.compile(plain_graph).to(self.device)
-
-        block_size = model.meta["block_size"]
-        model.train()
+        has_opts, plain_graph, model = self._compile_fresh(entry)
         self.training = True
         self.training_id = model_id
         self.train_state = {
             "step": 0,
             "max_steps": max_steps,
             "train_loss": None,
-            "val_loss": None,
+            "steps_per_sec": None,
+            "curve": [],  # downsampled [step, loss] history, so a reload keeps the graph
             "status": "running",
+            "phase": "tokenizing",  # each model trains its own tokenizer before stepping
         }
-
-        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-
-        if bench:
-            fwd_times: list[float] = []
-            bwd_times: list[float] = []
+        if bench and self.device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(self.device)
 
         try:
-            for step in range(max_steps):
-                if not self.training:
-                    self.train_state["status"] = "stopped"
-                    break
+            # train this model's own tokenizer at its vocab_size, then tokenize the corpus
+            tokenizer, train_data, _ = self._tokenize_corpus(model.meta["vocab_size"])
+            self.train_state["phase"] = "training"
 
-                # train step
-                x, y = self._get_batch("train", block_size, batch_size)
-
-                if bench:
-                    t0 = self._stamp()
-
-                _, loss, _ = model(x, y)
-
-                if bench:
-                    t_fwd = self._stamp()
-
-                optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-
-                if bench:
-                    t_bwd = self._stamp()
-
-                optimizer.step()
-
-                # stream progress every step: the per-step train loss + step counter
-                self.train_state["step"] = step + 1
-                self.train_state["train_loss"] = loss.item()
-
-                if bench:
-                    fwd_times.append((t_fwd - t0) * 1000)
-                    bwd_times.append((t_bwd - t_fwd) * 1000)
-                    recent = [f + b for f, b in zip(fwd_times[-10:], bwd_times[-10:])]
-                    self.train_state["bench"] = {
-                        "steps_per_sec": 1000.0 / (sum(recent) / len(recent)),
-                    }
-
-            # only a full run marks completion; a stopped run keeps its "stopped" status and the
-            # step it reached. The save below is gated on this, so a stopped run never persists.
-            stopped = self.train_state["status"] == "stopped"
-            if not stopped:
+            completed, fwd, bwd = self._train_loop(
+                model, train_data, self.train_state, max_steps, batch_size, learning_rate, bench
+            )
+            # only a full run marks completion; a stopped run keeps its "stopped" status and step.
+            # The save is gated on completion, so a stopped run never overwrites existing weights.
+            if not completed:
+                self.train_state["status"] = "stopped"
+            else:
                 self.train_state["step"] = max_steps
                 self.train_state["status"] = "completed"
-
-            # persist ONLY on a successful full run - a stopped run leaves any existing locker
-            # weights untouched (we never overwrite good weights with a partial/aborted run)
-            if not stopped:
-                # commit the trained (plain fp32, unfused) weights to the locker
-                unfused = self._unfused_state(model, plain_graph)
-                tokenizer = load_tokenizer(TOKENIZER_PATH)
-                store.save(model_id, tokenizer, unfused, entry.structure_hash)
-
-                # refresh the cache so inference is ready with no user recompile
-                if has_opts:
-                    inference_model = self.compiler.compile(entry.graph, pretrained_state=unfused)
-                    inference_model.to(self.device)
-                    inference_model.eval()
-                    self.cache[model_id] = ModelCacheEntry(
-                        entry.full_hash,
-                        entry.structure_hash,
-                        entry.graph,
-                        inference_model,
-                        tokenizer,
-                    )
-                else:
-                    # no opts: the freshly trained model IS the inference model, so point the cache
-                    # entry at it (we trained a new object, not entry.model in place)
-                    entry.model = model
-                    entry.tokenizer = tokenizer
+                if bench and fwd:
+                    self.train_state["bench"] = self._final_bench(model, fwd, bwd)
+                self._persist(model_id, model, plain_graph, has_opts, entry, tokenizer)
                 self.train_state["saved"] = model_id
-
         except Exception as e:
             # surface the failure as a terminal state so the stream ends instead of hanging
             self.train_state["status"] = "error"
@@ -306,9 +258,183 @@ class Worker:
         finally:
             self.training = False
             self.training_id = None
-            model.eval()
 
-        return self.train_state
+    def train_bench(
+        self,
+        model_ids: list[str],
+        max_steps: int = 500,
+        batch_size: int = 16,
+        learning_rate: float = 3e-4,
+    ):
+        """Train several already-compiled models one after another, benchmarking each. Progress for
+        all models lives in self.bench_state (streamed by /train/bench); models train sequentially,
+        so `current` marks the one in flight. Stop is cooperative via self.training."""
+
+        def _fail(msg: str):
+            self.bench_state = {"status": "error", "error": msg, "current": 0, "models": []}
+
+        if self.training:
+            _fail("training already in progress")
+            return
+        if not (RAW_DIR / "corpus.txt").exists():
+            _fail("no corpus - upload a corpus first")
+            return
+
+        entries = []
+        for mid in model_ids:
+            e = self.cache.get(mid)
+            if e is None:
+                _fail("all selected models must be compiled first")
+                return
+            entries.append((mid, e))
+
+        self.training = True
+        self.bench_state = {
+            "status": "running",
+            "current": 0,
+            "models": [_bench_slot(mid, max_steps) for mid, _ in entries],
+        }
+        # models that share a vocab_size (e.g. opt variants of one graph) reuse one tokenizer
+        tok_cache: dict[int, tuple] = {}
+
+        try:
+            for i, (mid, entry) in enumerate(entries):
+                if not self.training:
+                    break
+                self.bench_state["current"] = i
+                slot = self.bench_state["models"][i]
+                slot["status"] = "running"
+
+                has_opts, plain_graph, model = self._compile_fresh(entry)
+                vocab = model.meta["vocab_size"]
+                if vocab not in tok_cache:
+                    slot["phase"] = "tokenizing"
+                    tok_cache[vocab] = self._tokenize_corpus(vocab)
+                tokenizer, train_data, _ = tok_cache[vocab]
+                slot["phase"] = "training"
+
+                if self.device.type == "cuda":
+                    torch.cuda.reset_peak_memory_stats(self.device)
+
+                completed, fwd, bwd = self._train_loop(
+                    model, train_data, slot, max_steps, batch_size, learning_rate, bench=True
+                )
+                if not completed:
+                    slot["status"] = "stopped"
+                    break
+
+                slot["step"] = max_steps
+                if fwd:
+                    slot["bench"] = self._final_bench(model, fwd, bwd)
+                self._persist(mid, model, plain_graph, has_opts, entry, tokenizer)
+                slot["status"] = "done"
+
+            self.bench_state["status"] = "completed" if self.training else "stopped"
+        except Exception as e:
+            self.bench_state["status"] = "error"
+            self.bench_state["error"] = str(e)
+        finally:
+            self.training = False
+
+    def _tokenize_corpus(self, vocab_size: int, val_fraction: float = 0.1):
+        """Train a fresh BPE tokenizer on the corpus at `vocab_size`, then tokenize + split it.
+        Returns (tokenizer, train_ids, val_ids)."""
+        corpus_path = RAW_DIR / "corpus.txt"
+        tokenizer = train_tokenizer(corpus_path, vocab_size=vocab_size)
+        ids = encode(tokenizer, corpus_path.read_text(encoding="utf-8"))
+        split = int(len(ids) * (1 - val_fraction))
+        dtype = np.uint16 if tokenizer.get_vocab_size() < 65536 else np.uint32
+        return tokenizer, np.array(ids[:split], dtype=dtype), np.array(ids[split:], dtype=dtype)
+
+    def _compile_fresh(self, entry: ModelCacheEntry):
+        """Compile a fresh (randomly initialized) training model from an entry's graph. Fusion/quant
+        are inference-only (no backward kernels), so we train the stripped plain graph."""
+        has_opts = has_inference_opts(entry.graph)
+        plain_graph = strip_inference_opts(entry.graph) if has_opts else entry.graph
+        model = self.compiler.compile(plain_graph).to(self.device)
+        return has_opts, plain_graph, model
+
+    def _train_loop(self, model, train_data, state, max_steps, batch_size, learning_rate, bench):
+        """Train `model` for up to max_steps on `train_data` (a token-id array), writing live
+        progress (step, train_loss, steps_per_sec) into `state`. Returns (done, fwd, bwd)."""
+        block_size = model.meta["block_size"]
+        model.train()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+        fwd_times: list[float] = []
+        bwd_times: list[float] = []
+        completed = True
+
+        for step in range(max_steps):
+            if not self.training:
+                completed = False
+                break
+
+            x, y = self._get_batch(train_data, block_size, batch_size)
+
+            if bench:
+                t0 = self._stamp()
+            _, loss, _ = model(x, y)
+            if bench:
+                t_fwd = self._stamp()
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            if bench:
+                t_bwd = self._stamp()
+            optimizer.step()
+
+            lv = loss.item()
+            state["step"] = step + 1
+            state["train_loss"] = lv
+
+            if step % max(1, max_steps // 200) == 0 or step == max_steps - 1:
+                state["curve"].append([step + 1, lv])
+            if bench:
+                fwd_times.append((t_fwd - t0) * 1000)
+                bwd_times.append((t_bwd - t_fwd) * 1000)
+                recent = [f + b for f, b in zip(fwd_times[-10:], bwd_times[-10:])]
+                state["steps_per_sec"] = 1000.0 / (sum(recent) / len(recent))
+
+        model.eval()
+        return completed, fwd_times, bwd_times
+
+    def _final_bench(self, model, fwd_times: list[float], bwd_times: list[float]) -> dict:
+        """Aggregate per-step timings + a per-node train profile into the benchmark summary."""
+        from dataclasses import asdict
+
+        from worker.bench import _timing_result, profile_graph
+
+        fwd = _timing_result(fwd_times)
+        bwd = _timing_result(bwd_times)
+        step_ms = fwd.median + bwd.median
+        peak_vram = None
+        if self.device.type == "cuda":
+            peak_vram = torch.cuda.max_memory_allocated(self.device) / (1024 * 1024)
+        profile = profile_graph(model=model, device=self.device, mode="train", warmup=1)
+        return {
+            "forward_ms": fwd.median,
+            "backward_ms": bwd.median,
+            "steps_per_sec": 1000.0 / step_ms if step_ms > 0 else 0,
+            "peak_vram_mb": peak_vram,
+            "profile": {"nodes": [asdict(n) for n in profile.nodes], "total_us": profile.total_us},
+        }
+
+    def _persist(self, model_id, model, plain_graph, has_opts, entry: ModelCacheEntry, tokenizer):
+        """Commit trained weights + this model's own tokenizer to the locker, and refresh the
+        in-memory cache for inference."""
+        unfused = self._unfused_state(model, plain_graph)
+        store.save(model_id, tokenizer, unfused, entry.structure_hash)
+        if has_opts:
+            # rebuild the fused/quant inference model on the freshly trained weights
+            inference_model = self.compiler.compile(entry.graph, pretrained_state=unfused)
+            inference_model.to(self.device)
+            inference_model.eval()
+            self.cache[model_id] = ModelCacheEntry(
+                entry.full_hash, entry.structure_hash, entry.graph, inference_model, tokenizer
+            )
+        else:
+            # no opts: the freshly trained model IS the inference model
+            entry.model = model
+            entry.tokenizer = tokenizer
 
     def stop_training(self):
         if not self.training:
@@ -322,6 +448,11 @@ class Worker:
         if self.train_state is None:
             return {"status": "idle", "training_id": None}
         return {**self.train_state, "training_id": self.training_id}
+
+    def get_bench_status(self):
+        if self.bench_state is None:
+            return {"status": "idle"}
+        return self.bench_state
 
     def _unfused_state(self, model, graph: GraphSpec) -> dict:
         """Return trained weights in unfused form so any graph variant can reload them.
@@ -368,10 +499,7 @@ class Worker:
             torch.cuda.synchronize(self.device)
         return time.perf_counter()
 
-    def _get_batch(self, split: str, block_size: int, batch_size: int):
-        path = DATA_DIR / ("train.bin" if split == "train" else "val.bin")
-        data = np.memmap(path, dtype=np.uint16, mode="r")
-
+    def _get_batch(self, data: np.ndarray, block_size: int, batch_size: int):
         ix = torch.randint(len(data) - block_size, (batch_size,))
         x = torch.stack([torch.from_numpy(data[i : i + block_size].astype(np.int64)) for i in ix])
         y = torch.stack(

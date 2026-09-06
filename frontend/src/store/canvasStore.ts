@@ -88,6 +88,7 @@ interface CanvasState {
   blockStart: string | null; // block boundary markers; the repeated slice is derived from them
   blockEnd: string | null;
   clipboard: Clipboard | null;
+  benchOpen: { train: boolean; inference: boolean }; // benchmark section toggle, persisted per mode
 
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
@@ -110,6 +111,7 @@ interface CanvasState {
   markCompiled: () => void;
   revertToCompiled: () => void;
   setMode: (mode: CanvasMode) => void;
+  setBenchOpen: (mode: CanvasMode, open: boolean) => void;
   setViewport: (vp: Viewport) => void;
   setSaveStatus: (status: "saving" | "saved") => void;
   loadProject: (id: string) => void;
@@ -175,6 +177,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   blockStart: null,
   blockEnd: null,
   clipboard: null,
+  benchOpen: { train: false, inference: false },
 
   // needsCompile/trained are NOT tracked here — the backend (worker model cache + weight locker) is
   // the source of truth, surfaced via compileStore. Edits just mutate the graph.
@@ -365,6 +368,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       };
     }),
   setMode: (mode) => set({ mode }), // not a graph edit -> no needsCompile
+  setBenchOpen: (mode, open) => set((s) => ({ benchOpen: { ...s.benchOpen, [mode]: open } })),
   setViewport: (viewport) => set({ viewport }), // pan/zoom is cosmetic -> no needsCompile
   setSaveStatus: (saveStatus) => set({ saveStatus }),
 
@@ -390,6 +394,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       blockEnd: c.blockEnd,
       viewport: c.viewport,
       lastCompiled: c.lastCompiled,
+      benchOpen: c.benchOpen ?? { train: false, inference: false },
       modelId: id,
       selectedId: null,
       saveStatus: "saved",
@@ -422,6 +427,7 @@ function persistableOf(s: CanvasState): PersistedCanvas {
     viewport: s.viewport,
     blockStart: s.blockStart,
     blockEnd: s.blockEnd,
+    benchOpen: s.benchOpen,
   };
 }
 

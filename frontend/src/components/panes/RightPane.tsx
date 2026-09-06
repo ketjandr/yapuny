@@ -1,45 +1,178 @@
-// Right pane: mode-aware controls. Train -> Config + Train (live loss curve, stats, hyperparams,
-// stop); Inference -> Generate (placeholder). A Benchmark toggle reveals the benchmark section
-// (per-node profiler for the active model + a head-to-head compare of trained models). Wired to the
-// worker over SSE: training via lib/trainStore, benchmarks via lib/benchStore. Collapsible + full-
-// view expandable via PaneShell; `expanded` lets sections widen their layout in full view.
+// Right pane: mode-aware controls.
+//  Train -> Config + Train (aggregate loss curve, current-model stats, hyperparams, stop) + a
+//    training Benchmark section: pick up to 5 compiled models, Train runs them sequentially and
+//    fills a fwd/bwd/steps-s/peak-vram table + per-model info & node profile.
+//  Inference -> Generate + a Benchmark section (per-node profiler + head-to-head generate compare).
+// The Benchmark toggle is persisted per project per mode and doubles as "benchmarking enabled";
+// it's locked while a run is in flight. Wired to the worker over SSE (trainStore / benchTrainStore /
+// benchStore). Collapsible + full-view expandable via PaneShell.
 import { useEffect, useMemo, useState } from "react";
 import { useTooltip } from "@/components/tooltipContext";
 import { api } from "@/lib/api";
 import { graphForProject } from "@/lib/graph";
+import type { GraphRequest } from "@/lib/types";
 import { useBenchStore } from "@/store/benchStore";
-import { type CanvasMode, N_LAYER_MAX, N_LAYER_MIN, useCanvasStore } from "@/store/canvasStore";
+import { type BenchModel, useBenchTrainStore } from "@/store/benchTrainStore";
+import { N_LAYER_MAX, N_LAYER_MIN, useCanvasStore } from "@/store/canvasStore";
 import { useCompileStore } from "@/store/compileStore";
 import { useProjectsStore } from "@/store/projectsStore";
 import { useTrainStore } from "@/store/trainStore";
 import { PaneShell } from "./PaneShell";
 
+// one distinct color per benchmarked model (curve line + row/chip swatch), current model first
+const BENCH_COLORS = ["#e6a24d", "#8fce6a", "#77d3e6", "#d9738a", "#b892e0"];
+
+interface CompareEntry {
+  id: string;
+  graph: GraphRequest;
+  title: string;
+}
+interface ModelInfo {
+  param_count: number;
+  vocab_size: number;
+  block_size: number;
+  n_layer?: number;
+  n_head?: number;
+  n_embd?: number;
+}
+interface CompareInfo {
+  ready: boolean;
+  trained: boolean;
+  info: ModelInfo | null;
+}
+
 export function RightPane() {
   const mode = useCanvasStore((s) => s.mode);
+  const modelId = useCanvasStore((s) => s.modelId);
+  const benchOpen = useCanvasStore((s) => s.benchOpen);
+  const setBenchOpen = useCanvasStore((s) => s.setBenchOpen);
+  const setSelected = useBenchTrainStore((s) => s.setSelected);
+  const clearSelected = useBenchTrainStore((s) => s.clearSelected);
   const [expanded, setExpanded] = useState(false);
-  // benchmark open-state is decoupled per mode: train and inference each remember their own
-  const [bench, setBench] = useState<Record<CanvasMode, boolean>>({ train: false, inference: false });
   const title = mode === "train" ? "Training" : "Inference";
+
+  // On project switch / reload: reattach to whatever the worker is running so a run (single or
+  // bench) survives, other projects can disable their Train, and the bench's selection + curves come
+  // back. The compare selection is per-project, so it's restored from the run or cleared for a fresh
+  // project. Runs live in the worker (background thread), independent of any open tab.
+  useEffect(() => {
+    let cancelled = false;
+    const bt = useBenchTrainStore.getState();
+    // the run is "owned" by its column-0 model; only that project shows the run + its selection
+    const ownsRun = (models?: { id: string }[]) => models?.[0]?.id === modelId;
+
+    // a run this session already tracks (no reload): restore selection only if we own it
+    if (bt.models.length > 0 && ownsRun(bt.models)) {
+      setSelected(bt.models.slice(1).map((m) => m.id));
+      return;
+    }
+    if (bt.status === "running" || bt.status === "stopping") return; // someone else's run; keep our selection as-is
+
+    clearSelected();
+    // fresh / reload: ask the worker what's running and reattach
+    api
+      .trainBenchStatus()
+      .then((s) => {
+        if (cancelled) return;
+        if (ownsRun(s?.models)) {
+          setSelected(s.models.slice(1).map((m: { id: string }) => m.id)); // restore our compare set
+          useBenchTrainStore.getState().follow(); // repopulate models + curves (running or just-finished)
+        } else if (s?.status === "running") {
+          useBenchTrainStore.getState().follow(); // reflect another project's run so Train disables here
+        } else {
+          api.trainStatus().then((t) => {
+            if (!cancelled && t?.status === "running" && t.training_id) useTrainStore.getState().follow(t.training_id);
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [modelId, setSelected, clearSelected]);
 
   return (
     <PaneShell side="right" title={title} expanded={expanded} onToggleExpand={() => setExpanded((v) => !v)}>
       <div className="pane-body">
         {mode === "train" ? (
-          <>
-            <ConfigSection expanded={expanded} />
-            <TrainSection expanded={expanded} />
-          </>
+          <TrainControls expanded={expanded} open={benchOpen.train} onToggle={(v) => setBenchOpen("train", v)} />
         ) : (
-          <GenerateSection expanded={expanded} />
+          <>
+            <GenerateSection expanded={expanded} />
+            <InferenceBenchmark expanded={expanded} open={benchOpen.inference} onToggle={(v) => setBenchOpen("inference", v)} />
+          </>
         )}
-        <BenchmarkSection
-          expanded={expanded}
-          open={bench[mode]}
-          onToggle={(v) => setBench((b) => ({ ...b, [mode]: v }))}
-        />
       </div>
     </PaneShell>
   );
+}
+
+// --- train mode: shared state for the train controls + training benchmark ---
+
+function TrainControls({ expanded, open, onToggle }: { expanded: boolean; open: boolean; onToggle: (v: boolean) => void }) {
+  const modelId = useCanvasStore((s) => s.modelId);
+  const toGraph = useCanvasStore((s) => s.toGraph);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const meta = useCanvasStore((s) => s.meta);
+  const projects = useProjectsStore((s) => s.projects);
+  const selected = useBenchTrainStore((s) => s.selected);
+  const runStatus = useBenchTrainStore((s) => s.status);
+
+  const titleOf = (id: string) => projects.find((p) => p.id === id)?.title ?? id;
+
+  // benchmark set = the open model (always column 0) + selected others, each as {id, graph, title}
+  // biome deps: recompute when the graph or selection changes
+  const entries = useMemo<CompareEntry[]>(() => {
+    const cur: CompareEntry = { id: modelId, graph: toGraph(), title: titleOf(modelId) };
+    const others = selected
+      .map((id) => {
+        const g = graphForProject(id);
+        return g ? { id, graph: g, title: titleOf(id) } : null;
+      })
+      .filter((e): e is CompareEntry => e !== null);
+    return [cur, ...others];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId, selected, projects, nodes, edges, meta]);
+
+  const infos = useCompareInfos(entries, runStatus);
+
+  return (
+    <>
+      <ConfigSection expanded={expanded} />
+      <TrainSection expanded={expanded} benchOn={open} entries={entries} infos={infos} />
+      <TrainBenchmark expanded={expanded} open={open} onToggle={onToggle} entries={entries} infos={infos} />
+    </>
+  );
+}
+
+// fetch each model's readiness + info (param count, config) via /model/status; refetch when the set
+// changes or a run ends (so trained/param stats refresh). The open model's live compile status is
+// tracked separately by compileStore - this is for the info panel + gating the other models.
+function useCompareInfos(entries: CompareEntry[], trigger: string): Record<string, CompareInfo> {
+  const [map, setMap] = useState<Record<string, CompareInfo>>({});
+  const key = `${entries.map((e) => e.id).join(",")}|${trigger}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stable = useMemo(() => entries, [key]);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      stable.map(async (e) => {
+        try {
+          const r = await api.modelStatus({ id: e.id, graph: e.graph });
+          return [e.id, { ready: r.status === "ready", trained: !!r.trained, info: r.model_info ?? null }] as const;
+        } catch {
+          return [e.id, { ready: false, trained: false, info: null }] as const;
+        }
+      }),
+    ).then((rows) => {
+      if (!cancelled) setMap(Object.fromEntries(rows));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [stable]);
+  return map;
 }
 
 // --- config ---
@@ -47,12 +180,10 @@ export function RightPane() {
 function ConfigSection({ expanded }: { expanded: boolean }) {
   const meta = useCanvasStore((s) => s.meta);
   const setMeta = useCanvasStore((s) => s.setMeta);
-  // n_embd snaps to a multiple of n_head (also enforced in the store); head_dim shown as a hint
   const snapEmbd = (n: number) => Math.max(meta.n_head, Math.round(n / meta.n_head) * meta.n_head);
   return (
     <section className="grp">
       <h3>Config</h3>
-      {/* full view: lay the 6 sliders out in a 2-column, 3-row grid */}
       <div className={`cfg${expanded ? " grid2" : ""}`}>
         <CfgSlider label="n_layer" value={meta.n_layer} min={N_LAYER_MIN} max={N_LAYER_MAX} step={1} onChange={(v) => setMeta({ n_layer: v })} />
         <CfgSlider label="n_head" value={meta.n_head} min={1} max={16} step={1} onChange={(v) => setMeta({ n_head: v })} />
@@ -104,20 +235,11 @@ function CfgSlider({
         </span>
         <NumField value={value} min={min} max={max} float={float} snap={snap} onCommit={onChange} />
       </div>
-      <input
-        className="cfg-range"
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
+      <input className="cfg-range" type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
     </div>
   );
 }
 
-// typed input: free typing, validated + clamped (+ snapped) to range on blur / Enter
 function NumField({
   value,
   min,
@@ -164,77 +286,118 @@ function NumField({
 
 // --- train ---
 
-function TrainSection({ expanded }: { expanded: boolean }) {
+function TrainSection({
+  expanded,
+  benchOn,
+  entries,
+  infos,
+}: {
+  expanded: boolean;
+  benchOn: boolean;
+  entries: CompareEntry[];
+  infos: Record<string, CompareInfo>;
+}) {
   const modelId = useCanvasStore((s) => s.modelId);
-  const compiled = useCompileStore((s) => s.status === "ready");
   const projects = useProjectsStore((s) => s.projects);
-  const run = useTrainStore();
-  // stats/curve belong to a run; only show them when the active model owns the current run
-  const mine = run.modelId === modelId;
-  const status = mine ? run.status : "idle";
-  const running = status === "running" || status === "stopping";
+  const compiledCurrent = useCompileStore((s) => s.status === "ready");
+  const single = useTrainStore();
+  const bench = useBenchTrainStore();
 
-  // the worker trains one model at a time; if a DIFFERENT model is mid-run, block Train here
-  const otherTraining = !mine && (run.status === "running" || run.status === "stopping");
-  const otherName = otherTraining
-    ? (projects.find((p) => p.id === run.modelId)?.title ?? "another model")
-    : "";
-
-  const [steps, setSteps] = useState("2000");
+  const [steps, setSteps] = useState("500");
   const [batch, setBatch] = useState("16");
   const [lr, setLr] = useState("3e-4");
 
-  // on mount / model switch, reattach to whatever run the worker is doing (survives a page reload).
-  // We follow the actual training model - even if it isn't the one open - so the store always
-  // mirrors the single global run and other projects can disable their Train button. Guarded so we
-  // don't re-follow a run this session is already streaming.
-  useEffect(() => {
-    if (useTrainStore.getState().status === "running" || useTrainStore.getState().status === "stopping") return;
-    let cancelled = false;
-    api
-      .trainStatus()
-      .then((s) => {
-        if (!cancelled && s?.status === "running" && s.training_id) {
-          useTrainStore.getState().follow(s.training_id);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [modelId]);
+  // (reconnect to an in-progress run + selection restore is handled once in RightPane)
+
+  const titleOf = (id: string) => projects.find((p) => p.id === id)?.title ?? id;
+
+  // run-in-progress detection. A bench run is "owned" by the project that started it (column 0);
+  // only the owner shows the run - every other project greys out (the worker is busy), even models
+  // that happen to be in the compare set, since they can't start their own run.
+  const singleRunning = single.status === "running" || single.status === "stopping";
+  const benchRunning = bench.status === "running" || bench.status === "stopping";
+  const benchOwner = bench.models[0]?.id === modelId;
+  const singleMine = single.modelId === modelId;
+  const otherBusy = (singleRunning && !singleMine) || (benchRunning && !benchOwner);
+  const running = benchOn ? benchRunning && benchOwner : singleRunning && singleMine;
+
+  // results are isolated per project: only show the bench run on the project that owns it, and the
+  // single run on the project it belongs to. Everything else shows an empty (idle) view.
+  const showBench = benchOn && benchOwner;
+  const showSingle = !benchOn && singleMine;
+  const curModel: BenchModel | null = showBench ? (bench.models[bench.current] ?? null) : null;
+  const activeName = !running ? "" : benchOn ? (curModel ? titleOf(curModel.id) : "") : titleOf(modelId);
+  // in a benchmark run, the heading name + tokenizing badge take the current model's assigned color
+  const activeColor = showBench ? BENCH_COLORS[bench.current % BENCH_COLORS.length] : "var(--ice)";
+
+  // gating: bench needs every selected model compiled; single needs the open model compiled
+  const othersReady = entries.slice(1).every((e) => infos[e.id]?.ready);
+  const allCompiled = compiledCurrent && othersReady;
+  const canStart = benchOn ? allCompiled : compiledCurrent;
+
+  const hp = () => ({
+    max_steps: Math.max(1, Math.round(Number(steps)) || 500),
+    batch_size: Math.max(1, Math.round(Number(batch)) || 16),
+    learning_rate: Number(lr) || 3e-4,
+  });
 
   const onTrain = () => {
     if (running) {
-      run.stop();
+      (benchOn ? bench.stop : single.stop)();
       return;
     }
-    run.start({
-      id: modelId,
-      max_steps: Math.max(1, Math.round(Number(steps)) || 2000),
-      batch_size: Math.max(1, Math.round(Number(batch)) || 16),
-      learning_rate: Number(lr) || 3e-4,
-      bench: true,
-    });
+    if (benchOn) bench.start(entries.map((e) => e.id), hp());
+    else single.start({ id: modelId, ...hp(), bench: false });
   };
 
-  const gate = otherTraining
-    ? `Training "${otherName}" is in progress`
-    : !compiled
-      ? "Compile the model before training"
-      : "";
-  const btnLabel = status === "stopping" ? "stopping…" : running ? "Stop" : "Train";
-  const loss = mine ? run.loss : null;
-  const sps = mine ? run.stepsPerSec : null;
-  const tip = useTooltip(gate); // on a wrapper span so the hint shows even while the button is disabled
+  const gate = otherBusy
+    ? `Training "${titleOf(otherBusyId(single, bench))}" is in progress`
+    : benchOn && !allCompiled
+      ? "Compile all selected models first"
+      : !compiledCurrent
+        ? "Compile the model before training"
+        : "";
+  const status = showBench ? bench.status : showSingle ? single.status : "idle";
+  const btnLabel = status === "stopping" ? "stopping…" : running ? "Stop" : benchOn ? "Train & benchmark" : "Train";
+
+  // stats: current model in this project's bench run, else its single run, else nothing
+  const step = showBench ? (curModel?.step ?? 0) : showSingle ? single.step : 0;
+  const maxSteps = showBench ? (curModel?.maxSteps ?? 0) : showSingle ? single.maxSteps : 0;
+  const loss = showBench ? (curModel?.loss ?? null) : showSingle ? single.loss : null;
+  const sps = showBench ? (curModel?.stepsPerSec ?? null) : showSingle ? single.stepsPerSec : null;
+
+  // loss curve: one colored line per model for this project's bench run, else its single line
+  const series = showBench
+    ? bench.models.map((m, i) => ({ color: BENCH_COLORS[i % BENCH_COLORS.length], curve: m.curve }))
+    : [{ color: "var(--ice)", curve: showSingle ? single.curve : [] }];
+  const curveMax = showBench ? (curModel?.maxSteps ?? 0) : showSingle ? single.maxSteps : 0;
+
+  // each model trains its own tokenizer first, which delays stepping - surface that phase
+  const tokenizing = running && (benchOn ? curModel?.phase === "tokenizing" : single.phase === "tokenizing");
+
+  const tip = useTooltip(gate);
 
   return (
     <section className="grp">
-      <h3>Train</h3>
+      <h3>
+        Train
+        {activeName && (
+          <span className="grp-sub mono" style={{ color: activeColor }}>
+            {activeName}
+          </span>
+        )}
+      </h3>
       <div className="pan-body">
-        <LossGraph curve={mine ? run.curve : []} maxSteps={mine ? run.maxSteps : 0} tall={expanded} />
+        <div className="loss-wrap">
+          <LossGraph series={series} maxSteps={curveMax} tall={expanded} />
+          {tokenizing && (
+            <span className="loss-badge" style={{ color: activeColor, borderColor: activeColor }}>
+              tokenizing corpus…
+            </span>
+          )}
+        </div>
         <div className="stat-row">
-          <Stat label="step" value={mine && (running || status !== "idle") ? `${run.step}/${run.maxSteps}` : "—"} />
+          <Stat label="step" value={running || status !== "idle" ? `${step}/${maxSteps}` : "—"} />
           <Stat label="loss" value={loss != null ? loss.toFixed(3) : "—"} />
           <Stat label="steps/s" value={sps != null ? sps.toFixed(1) : "—"} />
         </div>
@@ -243,30 +406,235 @@ function TrainSection({ expanded }: { expanded: boolean }) {
           <HPField label="batch" value={batch} onChange={setBatch} disabled={running} />
           <HPField label="lr" value={lr} onChange={setLr} disabled={running} />
         </div>
-        {/* wrapper carries the tooltip so the hint shows even while the button is disabled */}
         <span className="btn-wrap" {...tip}>
           <button
             type="button"
             className={`btn ${running ? "danger" : "primary"}`}
-            disabled={!running && (otherTraining || !compiled)}
+            disabled={!running && (otherBusy || !canStart)}
             onClick={onTrain}
           >
             {btnLabel}
           </button>
         </span>
-        <RunNote status={status} error={mine ? run.error : null} saved={status === "completed"} />
+        <RunNote status={status} error={benchOn ? bench.error : singleMine ? single.error : null} saved={status === "completed"} bench={benchOn} />
       </div>
     </section>
   );
 }
 
-// short status line under the Train button (done / stopped / error), mirroring the run state
-function RunNote({ status, error, saved }: { status: string; error: string | null; saved: boolean }) {
+// the model id of whatever run is currently occupying the worker (for the "in progress" tooltip)
+function otherBusyId(single: { modelId: string | null }, bench: { models: BenchModel[]; current: number }): string {
+  return bench.models[bench.current]?.id ?? single.modelId ?? "";
+}
+
+function RunNote({ status, error, saved, bench }: { status: string; error: string | null; saved: boolean; bench: boolean }) {
   if (status === "error") return <div className="run-note bad">{error ?? "training failed"}</div>;
-  if (status === "stopped") return <div className="run-note">stopped — not saved (last trained weights kept)</div>;
-  if (saved) return <div className="run-note ok">✓ trained &amp; saved</div>;
+  if (status === "stopped") return <div className="run-note">training stopped - not saved (last trained weights kept)</div>;
+  if (saved) return <div className="run-note ok">{bench ? "✓ benchmark complete — models trained & saved" : "✓ trained & saved"}</div>;
   return null;
 }
+
+// --- training benchmark: model picker + fwd/bwd/steps-s/vram table + per-model info & profile ---
+
+function TrainBenchmark({
+  expanded,
+  open,
+  onToggle,
+  entries,
+  infos,
+}: {
+  expanded: boolean;
+  open: boolean;
+  onToggle: (v: boolean) => void;
+  entries: CompareEntry[];
+  infos: Record<string, CompareInfo>;
+}) {
+  const modelId = useCanvasStore((s) => s.modelId);
+  const projects = useProjectsStore((s) => s.projects);
+  const bench = useBenchTrainStore();
+  const selected = bench.selected;
+  const toggleSelected = bench.toggleSelected;
+  // results are isolated per project: this project only sees a run it owns (column 0). Other projects
+  // never see it - they show their own empty benchmark. The toggle + picker lock only on the owner.
+  const owned = bench.models[0]?.id === modelId;
+  const myModels = owned ? bench.models : [];
+  const running = (bench.status === "running" || bench.status === "stopping") && owned;
+
+  const others = projects.filter((p) => p.id !== modelId);
+
+  // which model's detail (info + node profile) is shown; default to the open model
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const detail = detailId ?? entries[0]?.id;
+
+  return (
+    <section className="grp">
+      <h3 style={open ? undefined : { marginBottom: 0 }}>
+        Benchmark
+        <button
+          type="button"
+          role="switch"
+          className={`sw${open ? " on" : ""}`}
+          aria-checked={open}
+          aria-label={open ? "Disable benchmark" : "Enable benchmark"}
+          disabled={running}
+          onClick={() => onToggle(!open)}
+        >
+          <span className="sw-knob" />
+        </button>
+      </h3>
+      {open && (
+        <div className="pan-body">
+          {/* model picker: the open model is always column 0; add up to 4 others (5 total) */}
+          <div className="cmp-picker">
+            {entries.map((e, i) => (
+              <span key={e.id} className="chip on" style={{ borderColor: BENCH_COLORS[i % BENCH_COLORS.length] }}>
+                <span className="chip-dot" style={{ background: BENCH_COLORS[i % BENCH_COLORS.length] }} />
+                {i === 0 ? `${e.title} (this)` : e.title}
+              </span>
+            ))}
+            {!running &&
+              others
+                .filter((p) => !selected.includes(p.id))
+                .map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="chip"
+                    disabled={selected.length >= 4}
+                    onClick={() => toggleSelected(p.id)}
+                  >
+                    + {p.title}
+                  </button>
+                ))}
+          </div>
+
+          {/* the table rows double as the model selector for the detail panel below */}
+          <BenchTable entries={entries} models={myModels} detail={detail} onSelect={setDetailId} />
+
+          {/* per-model detail: config + params + node profile, for the selected row */}
+          <div className="bench-detail">
+            <ModelDetail info={infos[detail]?.info ?? null} model={myModels.find((m) => m.id === detail) ?? null} expanded={expanded} />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// one row per benchmarked model: fwd/bwd ms, steps/s (with a throughput bar), peak vram. Rows are
+// the selector for the detail panel - click one to show that model's config + node profile.
+function BenchTable({
+  entries,
+  models,
+  detail,
+  onSelect,
+}: {
+  entries: CompareEntry[];
+  models: BenchModel[];
+  detail?: string;
+  onSelect: (id: string) => void;
+}) {
+  const byId = new Map(models.map((m) => [m.id, m]));
+  const maxSps = Math.max(1, ...models.map((m) => m.bench?.steps_per_sec ?? 0));
+  const cell = (v: number | null | undefined, d: number) => (v != null ? v.toFixed(d) : "—");
+
+  return (
+    <div className="cmp-scroll">
+      <table className="bt-table mono">
+        <thead>
+          <tr>
+            <th className="bt-name">model</th>
+            <th>fwd ms</th>
+            <th>bwd ms</th>
+            <th className="bt-tp">steps / s</th>
+            <th>peak vram</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((e, i) => {
+            const m = byId.get(e.id);
+            const b = m?.bench;
+            const color = BENCH_COLORS[i % BENCH_COLORS.length];
+            const pending = !b && m?.status !== "running";
+            return (
+              <tr key={e.id} className={`bt-row${detail === e.id ? " sel" : ""}`} onClick={() => onSelect(e.id)}>
+                <td className="bt-name">
+                  <span className="bt-bar" style={{ background: color }} />
+                  {e.title}
+                </td>
+                <td>{cell(b?.forward_ms, 2)}</td>
+                <td>{cell(b?.backward_ms, 2)}</td>
+                <td className="bt-tp">
+                  {b ? (
+                    <span className="bt-tp-wrap">
+                      <span className="bt-tp-num">{b.steps_per_sec.toFixed(1)}</span>
+                      <span className="bb-track">
+                        <span className="bb-fill" style={{ width: `${(b.steps_per_sec / maxSps) * 100}%`, background: color }} />
+                      </span>
+                    </span>
+                  ) : m?.status === "running" ? (
+                    <span className="bt-live">{m.phase === "tokenizing" ? "tokenizing…" : `training… ${m.step}/${m.maxSteps}`}</span>
+                  ) : (
+                    <span className="bench-empty">{pending ? "pending" : "—"}</span>
+                  )}
+                </td>
+                <td>{b?.peak_vram_mb != null ? `${(b.peak_vram_mb / 1024).toFixed(2)} GB` : "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ModelDetail({ info, model, expanded }: { info: ModelInfo | null; model: BenchModel | null; expanded: boolean }) {
+  const nodes = model?.bench?.profile.nodes ?? [];
+  const top = expanded ? nodes.slice(0, 10) : nodes.slice(0, 6);
+  return (
+    <div className="bench-block">
+      {info ? (
+        <div className="info-grid">
+          <Info k="params" v={fmtParams(info.param_count)} />
+          <Info k="n_layer" v={String(info.n_layer ?? "—")} />
+          <Info k="n_head" v={String(info.n_head ?? "—")} />
+          <Info k="n_embd" v={String(info.n_embd ?? "—")} />
+          <Info k="block" v={String(info.block_size)} />
+          <Info k="vocab" v={String(info.vocab_size)} />
+        </div>
+      ) : (
+        <div className="bench-empty">Compile this model to see its config.</div>
+      )}
+      {top.length > 0 ? (
+        <div className="bench-nodes">
+          <span className="bench-sub">Node profile (train step)</span>
+          {top.map((n) => (
+            <BenchBar key={n.node_id} label={n.logical_id} pct={n.pct} sub={`${n.pct.toFixed(0)}%`} />
+          ))}
+        </div>
+      ) : (
+        <div className="bench-empty">Run the benchmark to profile this model’s nodes.</div>
+      )}
+    </div>
+  );
+}
+
+function Info({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="info-cell">
+      <span className="info-v mono">{v}</span>
+      <span className="info-k">{k}</span>
+    </div>
+  );
+}
+
+function fmtParams(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(n);
+}
+
+// --- inference: generate + benchmark (per-node profiler + generate compare) ---
 
 function GenerateSection({ expanded }: { expanded: boolean }) {
   return (
@@ -288,21 +656,9 @@ function GenerateSection({ expanded }: { expanded: boolean }) {
   );
 }
 
-// --- benchmark ---
-
-function BenchmarkSection({
-  expanded,
-  open,
-  onToggle,
-}: {
-  expanded: boolean;
-  open: boolean;
-  onToggle: (v: boolean) => void;
-}) {
+function InferenceBenchmark({ expanded, open, onToggle }: { expanded: boolean; open: boolean; onToggle: (v: boolean) => void }) {
   return (
     <section className="grp">
-      {/* subheading is always visible; the toggle shows/hides the section body. No bottom margin
-          when closed so the collapsed section stays vertically balanced. */}
       <h3 style={open ? undefined : { marginBottom: 0 }}>
         Benchmark
         <button
@@ -326,7 +682,6 @@ function BenchmarkSection({
   );
 }
 
-// per-node profiler for the active model: bars sized by each node's share of the forward pass
 function ProfilePanel() {
   const modelId = useCanvasStore((s) => s.modelId);
   const compiled = useCompileStore((s) => s.status === "ready");
@@ -334,20 +689,13 @@ function ProfilePanel() {
   const { profiling, profile, profileError, runProfile } = useBenchStore();
 
   const top = useMemo(() => (profile ? profile.nodes.slice(0, 8) : []), [profile]);
-  // the profiler times the model in the worker's cache: it must be compiled and trained
   const gate = !compiled ? "Compile the model before profiling" : !trained ? "Train the model before profiling" : "";
 
   return (
     <div className="bench-block">
       <div className="bench-head">
         <span className="bench-sub">Per-node profile</span>
-        <button
-          type="button"
-          className="btn tiny"
-          disabled={profiling || !compiled || !trained}
-          title={gate || undefined}
-          onClick={() => runProfile({ id: modelId, mode: "decode" })}
-        >
+        <button type="button" className="btn tiny" disabled={profiling || !compiled || !trained} title={gate || undefined} onClick={() => runProfile({ id: modelId, mode: "decode" })}>
           {profiling ? "profiling…" : "Profile"}
         </button>
       </div>
@@ -364,7 +712,6 @@ function ProfilePanel() {
   );
 }
 
-// head-to-head compare: the active model vs. other saved projects, generation timing side by side
 function ComparePanel({ expanded }: { expanded: boolean }) {
   const modelId = useCanvasStore((s) => s.modelId);
   const toGraph = useCanvasStore((s) => s.toGraph);
@@ -376,9 +723,7 @@ function ComparePanel({ expanded }: { expanded: boolean }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [prompt, setPrompt] = useState("The ");
 
-  // cap total columns at the backend's 5 (current model + up to 4 others)
-  const toggle = (id: string) =>
-    setPicked((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= 4 ? s : [...s, id]));
+  const toggle = (id: string) => setPicked((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= 4 ? s : [...s, id]));
 
   const onRun = () => {
     const entries = [
@@ -401,28 +746,13 @@ function ComparePanel({ expanded }: { expanded: boolean }) {
           {comparing ? "running…" : "Run"}
         </button>
       </div>
-
-      <input
-        className="hp-in mono cmp-prompt"
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder="prompt"
-        aria-label="compare prompt"
-      />
-
+      <input className="hp-in mono cmp-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="prompt" aria-label="compare prompt" />
       {others.length > 0 ? (
         <div className="cmp-picker">
           {others.map((p) => {
             const on = picked.includes(p.id);
             return (
-              <button
-                key={p.id}
-                type="button"
-                className={`chip${on ? " on" : ""}`}
-                aria-pressed={on}
-                disabled={!on && picked.length >= 4}
-                onClick={() => toggle(p.id)}
-              >
+              <button key={p.id} type="button" className={`chip${on ? " on" : ""}`} aria-pressed={on} disabled={!on && picked.length >= 4} onClick={() => toggle(p.id)}>
                 {p.title}
               </button>
             );
@@ -431,7 +761,6 @@ function ComparePanel({ expanded }: { expanded: boolean }) {
       ) : (
         <div className="bench-empty">Save more models to compare against.</div>
       )}
-
       {columns.length > 0 && <CompareTable expanded={expanded} />}
     </div>
   );
@@ -482,7 +811,6 @@ function CmpRow({ label, cells, best }: { label: string; cells: string[]; best: 
   );
 }
 
-// index of the winning column for a metric (highest tok/s, lowest latency), ignoring errored/pending
 function bestIdx(cols: { error: string | null }[], pick: (c: any) => number | null, dir: "max" | "min"): number {
   let best = -1;
   let val = dir === "max" ? -Infinity : Infinity;
@@ -508,7 +836,6 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-// uncontrolled hyperparameter (generate); controlled variant below for the train fields
 function HP({ label, def }: { label: string; def: string }) {
   return (
     <label className="hp">
@@ -518,49 +845,39 @@ function HP({ label, def }: { label: string; def: string }) {
   );
 }
 
-function HPField({
-  label,
-  value,
-  onChange,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  disabled?: boolean;
-}) {
+function HPField({ label, value, onChange, disabled }: { label: string; value: string; onChange: (v: string) => void; disabled?: boolean }) {
   return (
     <label className="hp">
       <span className="hp-k">{label}</span>
-      <input
-        className="hp-in mono"
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-      />
+      <input className="hp-in mono" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
     </label>
   );
 }
 
-// live loss curve: the per-step train loss, auto-scaled to the observed loss range. It advances
-// every step (no eval pauses), so the line just grows smoothly as training runs.
-function LossGraph({ curve, maxSteps, tall }: { curve: { step: number; loss: number }[]; maxSteps: number; tall?: boolean }) {
-  const train = useMemo(() => {
-    if (curve.length === 0) return "";
-    const losses = curve.map((p) => p.loss);
-    const lo = Math.min(...losses);
-    const hi = Math.max(...losses);
+// aggregate loss curve: one colored line per model, auto-scaled to the observed loss range
+function LossGraph({ series, maxSteps, tall }: { series: { color: string; curve: { step: number; loss: number }[] }[]; maxSteps: number; tall?: boolean }) {
+  const lines = useMemo(() => {
+    const all = series.flatMap((s) => s.curve.map((p) => p.loss));
+    if (all.length === 0) return [] as { color: string; pts: string }[];
+    const lo = Math.min(...all);
+    const hi = Math.max(...all);
     const range = hi - lo || 1;
-    const xMax = maxSteps || curve[curve.length - 1].step || 1;
-    const x = (step: number) => (step / xMax) * 100;
-    const y = (v: number) => 39 - ((v - lo) / range) * 37; // invert; pad 1 top / 2 bottom
-    return curve.map((p) => `${x(p.step).toFixed(2)},${y(p.loss).toFixed(2)}`).join(" ");
-  }, [curve, maxSteps]);
+    const lastStep = Math.max(1, ...series.flatMap((s) => s.curve.map((p) => p.step)));
+    const xMax = maxSteps || lastStep;
+    const x = (s: number) => (s / xMax) * 100;
+    const y = (v: number) => 39 - ((v - lo) / range) * 37;
+    return series
+      .map((s) => ({ color: s.color, pts: s.curve.map((p) => `${x(p.step).toFixed(2)},${y(p.loss).toFixed(2)}`).join(" ") }))
+      .filter((l) => l.pts);
+  }, [series, maxSteps]);
 
   return (
     <svg className="loss-graph" viewBox="0 0 100 40" preserveAspectRatio="none" style={{ height: tall ? 180 : 92 }} aria-hidden="true">
-      {train ? (
-        <polyline points={train} fill="none" stroke="var(--ice)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      {lines.length ? (
+        lines.map((l, i) => (
+          // biome index key: series order is stable within a run
+          <polyline key={i} points={l.pts} fill="none" stroke={l.color} strokeWidth="1" vectorEffect="non-scaling-stroke" />
+        ))
       ) : (
         <line x1="0" y1="20" x2="100" y2="20" stroke="var(--line2)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
       )}
