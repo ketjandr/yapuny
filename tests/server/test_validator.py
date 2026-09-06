@@ -371,4 +371,4 @@ class TestWarnings:
         ]
         graph = GraphSpec.from_dict(valid_graph_dict)
         result = validator.validate(graph)
-        assert any("LayerNorm" in w for w in result.warnings)
+        assert any("layer norm" in w for w in result.warnings)
