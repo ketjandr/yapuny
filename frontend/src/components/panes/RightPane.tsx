@@ -556,7 +556,9 @@ function RunNote({ status, error, saved, bench }: { status: string; error: strin
   if (status === "error") return <div className="run-note bad">{error ?? "training failed"}</div>;
   if (status === "stopped") return <div className="run-note">training stopped - not saved (last trained weights kept)</div>;
   if (saved) return <div className="run-note ok">{bench ? "✓ benchmark complete - models trained & saved" : "✓ trained & saved"}</div>;
-  return null;
+  // no message: a non-breaking space holds exactly one line, so toggling the benchmark doesn't
+  // shift the section (matches a one-line message's height precisely)
+  return <div className="run-note">{" "}</div>;
 }
 
 // --- training benchmark: model picker + fwd/bwd/steps-s/vram table + per-model info & profile ---

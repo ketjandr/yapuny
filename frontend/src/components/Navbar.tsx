@@ -68,10 +68,12 @@ function WorkerConnect() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
-    document.addEventListener("mousedown", onDown);
+    // capture phase: the canvas (React Flow) stops mousedown propagation, so a bubble-phase listener
+    // would miss clicks there - capture fires before any child can stop it
+    document.addEventListener("mousedown", onDown, true);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("mousedown", onDown, true);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
@@ -116,7 +118,7 @@ function ConnectPanel({ onClose }: { onClose: () => void }) {
       <div className="wpanel-title">Connect a worker</div>
       <p className="wpanel-note">
         Run the worker locally and paste its URL, or point at a remote one. Leave the URL blank in
-        local dev to use the built-in proxy.
+        dev to use the built-in proxy.
       </p>
       <label className="wpanel-field">
         <span>Worker URL</span>

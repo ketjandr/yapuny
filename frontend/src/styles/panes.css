@@ -847,6 +847,7 @@
 
 /* short status line under a run's controls */
 .run-note {
+  /* the empty state renders a non-breaking space, so one line is always reserved (no layout shift) */
   font-size: 11px;
   color: var(--muted);
 }
