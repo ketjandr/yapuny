@@ -97,6 +97,7 @@ export const useInferStore = create<InferState>((set, get) => ({
   stop: () => {
     ctrl?.abort();
     ctrl = null;
+    api.generateStop().catch(() => {}); // tell the worker to break its loop and free the GPU
     set((s) => (s.status === "running" ? { status: "done" } : {}));
     useWorkerStore.getState().refresh();
   },

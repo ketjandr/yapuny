@@ -292,7 +292,7 @@ class TestBenchRoutes:
         _seed_package("m-a", graph_a)
 
         resp = client.post(
-            "/api/bench/generate",
+            "/api/generate/bench",
             json={
                 "graphs": [{"id": "m-a", "graph": graph_a}],
                 "prompt": "abc",
@@ -322,7 +322,7 @@ class TestBenchRoutes:
         _seed_package("m-v2", graph_v2)
 
         resp = client.post(
-            "/api/bench/generate",
+            "/api/generate/bench",
             json={
                 "graphs": [{"id": "m-v1", "graph": graph_v1}, {"id": "m-v2", "graph": graph_v2}],
                 "prompt": "abc",
@@ -348,7 +348,7 @@ class TestBenchRoutes:
         graph = default_gpt_graph(n_layer=1, n_head=2, n_embd=32, block_size=16, vocab_size=8000)
 
         resp = client.post(
-            "/api/bench/generate",
+            "/api/generate/bench",
             json={
                 "graphs": [{"id": "never-trained", "graph": graph}],
                 "prompt": "abc",

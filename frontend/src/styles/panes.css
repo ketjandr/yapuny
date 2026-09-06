@@ -917,6 +917,21 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+/* a selected chip that can be clicked to deselect */
+.chip.rm {
+  cursor: pointer;
+}
+.chip-x {
+  margin-left: 6px;
+  opacity: 0.5;
+}
+.chip.rm:hover {
+  border-color: var(--red);
+}
+.chip.rm:hover .chip-x {
+  opacity: 1;
+  color: var(--red);
+}
 .cmp-scroll {
   overflow-x: auto;
 }

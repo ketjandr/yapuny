@@ -27,6 +27,7 @@ def _worker_with_model():
     w = Worker.__new__(Worker)
     w.device = torch.device("cpu")
     w.cache = {"m": ModelCacheEntry("fh", "sh", graph, model, None)}
+    w.stop_inference = False
     return w
 
 

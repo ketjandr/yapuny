@@ -29,6 +29,7 @@ export const api = {
   trainStop: () => post("/train/stop", {}).then(j),
   trainStatus: () => fetch("/api/train/status").then(j),
   trainBenchStatus: () => fetch("/api/train/bench/status").then(j),
+  benchGenStatus: () => fetch("/api/generate/bench/status").then(j), // last compare's results (reload)
   workerActivity: () => fetch("/api/worker/activity").then(j), // what occupies the GPU (train/infer)
 
   // streaming endpoints return the raw Response; read with lib/sse.ts
@@ -37,7 +38,8 @@ export const api = {
   trainBench: (req: TrainBenchRequest) => post("/train/bench", req), // sequential multi-model bench
   trainBenchFollow: () => fetch("/api/train/bench/follow"),
   generateStream: (req: GenerateRequest, signal?: AbortSignal) => post("/generate/stream", req, signal),
-  benchStream: (req: BenchRunRequest, signal?: AbortSignal) => post("/bench/generate", req, signal),
+  generateStop: () => post("/generate/stop", {}).then(j), // cooperative cancel for generate + bench
+  benchStream: (req: BenchRunRequest, signal?: AbortSignal) => post("/generate/bench", req, signal),
 
   profile: (req: ProfileRequest) => post("/bench/profile", req).then(j),
 };

@@ -214,6 +214,7 @@ def generate(request: GenerateRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
     worker.inferring = True
+    worker.stop_inference = False
     worker.set_activity("generate", request.id)
     try:
         result = worker.generate(
@@ -245,6 +246,7 @@ def generate_stream(request: GenerateRequest):
     # mark the GPU busy before returning the response so a concurrent train/generate is rejected;
     # the generator's finally clears it when the stream ends (or the client disconnects)
     worker.inferring = True
+    worker.stop_inference = False
     worker.set_activity("generate", request.id)
 
     def event_stream():
@@ -411,6 +413,15 @@ def stop_training():
     return result
 
 
+@router.post("/generate/stop", tags=["generate"])
+def stop_generate():
+    # cooperative cancel for a streaming generate or inference benchmark: the generation loop
+    # breaks on its next step and its stream ends, freeing the GPU (a separate request from the
+    # aborted stream, so it lands even after the client stops reading)
+    worker.stop_inference = True
+    return {"status": "stopping"}
+
+
 # -- Benchmark --
 
 
@@ -452,13 +463,36 @@ def _bench_stream(request: BenchRunRequest):
     compiler = GraphCompiler()
     device = worker.device
 
+    # results snapshot kept on the worker so a page reload can rehydrate the table (mirrors the
+    # training benchmark's bench_state); one column per model, filled in as its events arrive
+    cols = [
+        {
+            "id": g.id,
+            "tokens_per_sec": None,
+            "ms_per_token": None,
+            "prefill_ms": None,
+            "peak_vram_mb": None,
+            "profile": [],
+            "text": "",
+            "gen_tokens": 0,
+            "running": False,
+            "error": None,
+            "done": False,
+        }
+        for g in request.graphs
+    ]
+    worker.gen_bench = {"owner": request.graphs[0].id, "status": "running", "columns": cols}
+
     try:
         for i, entry in enumerate(request.graphs):
+            if worker.stop_inference:
+                break  # a /generate/stop landed - halt the whole compare, not just this model
             graph = GraphSpec.from_dict(entry.graph.model_dump())
             s_hash = graph_structure_hash(graph)
 
             pkg = store.load(entry.id)
             if pkg is None or pkg.structure_hash != s_hash:
+                cols[i]["error"], cols[i]["done"] = "model not trained", True
                 err = {"graph_idx": i, "error": "model not trained"}
                 yield f"event: error\ndata: {json.dumps(err)}\n\n"
                 continue
@@ -475,6 +509,7 @@ def _bench_stream(request: BenchRunRequest):
             if device.type == "cuda":
                 torch.cuda.synchronize(device)
 
+            cols[i]["running"] = True
             yield f"event: graph_start\ndata: {json.dumps({'graph_idx': i})}\n\n"
 
             for event in worker._stream_tokens(
@@ -486,19 +521,41 @@ def _bench_stream(request: BenchRunRequest):
                 top_k=request.top_k,
                 bench=True,
             ):
-                event["data"]["graph_idx"] = i
-                yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
+                ev, data = event["event"], event["data"]
+                if ev == "prefill":
+                    cols[i]["prefill_ms"] = data["prefill_ms"]
+                elif ev == "token":
+                    cols[i]["text"] += data.get("text") or ""
+                    cols[i]["gen_tokens"] += 1
+                elif ev == "profile":
+                    cols[i]["profile"] = data["nodes"]
+                elif ev == "done":
+                    b = data.get("bench") or {}
+                    cols[i].update(
+                        tokens_per_sec=b.get("tokens_per_sec"),
+                        ms_per_token=b.get("decode_ms_per_token"),
+                        prefill_ms=b.get("prefill_ms", cols[i]["prefill_ms"]),
+                        peak_vram_mb=b.get("peak_vram_mb"),
+                        text=data.get("text") or cols[i]["text"],
+                        running=False,
+                        done=True,
+                    )
+                data["graph_idx"] = i
+                yield f"event: {ev}\ndata: {json.dumps(data)}\n\n"
 
         yield f"event: done\ndata: {json.dumps({'env': _collect_env(device)})}\n\n"
 
     except Exception as e:
+        if worker.gen_bench:
+            worker.gen_bench["status"] = "error"
         yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
 
-@router.post("/bench/generate", tags=["benchmark"])
+@router.post("/generate/bench", tags=["benchmark"])
 def bench_generate(request: BenchRunRequest):
     _require_idle()
     worker.inferring = True
+    worker.stop_inference = False
     worker.set_activity("gen_bench", request.graphs[0].id)
 
     def stream():
@@ -507,8 +564,19 @@ def bench_generate(request: BenchRunRequest):
         finally:
             worker.inferring = False
             worker.clear_activity()
+            # settle the snapshot's status so a reload after a completed / stopped / disconnected
+            # run rehydrates a finished table rather than a stuck "running" one
+            if worker.gen_bench and worker.gen_bench.get("status") == "running":
+                worker.gen_bench["status"] = "done"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.get("/generate/bench/status", tags=["benchmark"])
+def bench_generate_status():
+    # last inference-benchmark's results (owner + per-model columns), kept in memory so a page
+    # reload can rehydrate the table; empty until a compare has run
+    return worker.gen_bench or {"owner": None, "status": "idle", "columns": []}
 
 
 @router.get("/worker/activity", tags=["worker"])

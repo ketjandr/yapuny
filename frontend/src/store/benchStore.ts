@@ -1,5 +1,5 @@
 // Benchmark state: (1) the per-node profiler for the active model (POST /bench/profile, one-shot),
-// and (2) a head-to-head compare of several trained models (POST /bench/generate, SSE) whose events
+// and (2) a head-to-head compare of several trained models (POST /generate/bench, SSE) whose events
 // are tagged by graph_idx - each column is one model, filled as its stream arrives. The store owns
 // the compare loop so it survives re-renders (e.g. the full-view toggle) while running.
 import { create } from "zustand";
@@ -45,6 +45,7 @@ interface BenchState {
   columns: BenchColumn[];
   compareOwner: string | null; // model id that started the run (column 0) - results isolate to it
   runCompare: (entries: (ModelGraphRequest & { label: string })[], opts: Omit<BenchRunRequest, "graphs">) => Promise<void>;
+  follow: () => Promise<void>; // rehydrate the last run's results after a reload (the worker keeps them)
   stopCompare: () => void;
   clearCompare: () => void;
 }
@@ -157,9 +158,39 @@ export const useBenchStore = create<BenchState>((set, get) => ({
     }
   },
 
+  follow: async () => {
+    if (get().comparing) return; // a live run this session owns the state - don't clobber it
+    let s: { owner: string | null; status: string; columns?: any[] };
+    try {
+      s = await api.benchGenStatus();
+    } catch {
+      return;
+    }
+    if (!s?.owner || !s.columns?.length) return; // nothing to rehydrate
+    set({
+      compareOwner: s.owner,
+      comparing: s.status === "running",
+      columns: s.columns.map((c) => ({
+        id: c.id,
+        label: c.label ?? c.id, // the table labels rows from project titles, not this
+        tokensPerSec: c.tokens_per_sec ?? null,
+        msPerToken: c.ms_per_token ?? null,
+        prefillMs: c.prefill_ms ?? null,
+        peakVramMb: c.peak_vram_mb ?? null,
+        profile: c.profile ?? [],
+        text: c.text ?? "",
+        genTokens: c.gen_tokens ?? 0,
+        running: c.running ?? false,
+        error: c.error ?? null,
+        done: c.done ?? false,
+      })),
+    });
+  },
+
   stopCompare: () => {
     compareCtrl?.abort();
     compareCtrl = null;
+    api.generateStop().catch(() => {}); // break the worker's loop so it stops mid-compare, frees GPU
     set({ comparing: false });
     useWorkerStore.getState().refresh();
   },

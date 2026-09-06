@@ -76,6 +76,8 @@ class Worker:
         self.train_state = None  # single-model run (POST /train/stream)
         self.bench_state = None  # multi-model benchmark run (POST /train/bench)
         self.inferring = False  # a generate / inference-benchmark run holds the GPU
+        self.stop_inference = False  # cooperative cancel: the generation loop breaks when set
+        self.gen_bench = None  # last inference-benchmark's results, kept so a reload can rehydrate
         # what currently occupies the GPU: {"kind": train|train_bench|generate|gen_bench,
         # "model_id"} or None. One universal busy signal every project reads to gate its controls.
         self.activity = None
@@ -598,6 +600,8 @@ class Worker:
             yield {"event": "prefill", "data": {"prefill_ms": prefill_ms}}
 
         for step in range(max_new_tokens):
+            if self.stop_inference:
+                break  # cooperative cancel (a /generate/stop landed) - end cleanly, no profiling
             next_id = self._sample(logits, temperature, top_k)
             idx = torch.cat((idx, next_id), dim=1)
             token = next_id.item()
@@ -651,17 +655,19 @@ class Worker:
 
         yield {"event": "done", "data": done_data}
 
-        if bench:
+        if bench and not self.stop_inference:
             from dataclasses import asdict
 
             from worker.bench import profile_graph
 
+            # per-node self-time shares are stable regardless of run length, so profile only a short
+            # decode - this is the pause between models, so it must not scale with max_new_tokens
             result = profile_graph(
                 model=model,
                 device=self.device,
                 mode="decode",
                 prompt_tokens=len(prompt_ids),
-                new_tokens=max_new_tokens,
+                new_tokens=min(max_new_tokens, 32),
                 warmup=1,
             )
             yield {

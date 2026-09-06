@@ -89,7 +89,7 @@ class GraphValidator:
             if req not in present:
                 errors.append(f"missing required node: {req}")
         if not (present & POSITIONAL_NODE_TYPES):
-            errors.append("missing required node: position_embedding or rope")
+            errors.append("missing required node: position_embedding or RoPE")
 
     def _check_complete_path(self, flow: GraphSpec, errors: list[str]):
         # flow holds only the nodes on an _input -> _output path; empty means no such path exists

@@ -34,6 +34,63 @@ import { PaneShell } from "./PaneShell";
 // one distinct color per benchmarked model (curve line + row/chip swatch), current model first
 const BENCH_COLORS = ["#e6a24d", "#8fce6a", "#77d3e6", "#d9738a", "#b892e0"];
 
+// shared compare-set picker for both benchmarks: column 0 is the open model (fixed), the other
+// selected models are removable chips (click to deselect), and remaining projects are "+ add" chips.
+// The selection is transient run config - not persisted - so it clears on reload / project switch.
+function ComparePicker({
+  entries,
+  others,
+  running,
+  canAdd,
+  onAdd,
+  onRemove,
+}: {
+  entries: CompareEntry[];
+  others: { id: string; title: string }[]; // projects not already in the set
+  running: boolean;
+  canAdd: boolean;
+  onAdd: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <div className="cmp-picker">
+      {entries.map((e, i) => {
+        const color = BENCH_COLORS[i % BENCH_COLORS.length];
+        const dot = <span className="chip-dot" style={{ background: color }} />;
+        // the open model (column 0) is fixed; while a run is in flight nothing can change
+        if (i === 0 || running) {
+          return (
+            <span key={e.id} className="chip on" style={{ borderColor: color }}>
+              {dot}
+              {i === 0 ? `${e.title} (this)` : e.title}
+            </span>
+          );
+        }
+        return (
+          <button
+            key={e.id}
+            type="button"
+            className="chip on rm"
+            style={{ borderColor: color }}
+            onClick={() => onRemove(e.id)}
+            title="Remove from benchmark"
+          >
+            {dot}
+            {e.title}
+            <span className="chip-x">×</span>
+          </button>
+        );
+      })}
+      {!running &&
+        others.map((p) => (
+          <button key={p.id} type="button" className="chip" disabled={!canAdd} onClick={() => onAdd(p.id)}>
+            + {p.title}
+          </button>
+        ))}
+    </div>
+  );
+}
+
 interface CompareEntry {
   id: string;
   graph: GraphRequest;
@@ -549,28 +606,14 @@ function TrainBenchmark({
       {open && (
         <div className="pan-body">
           {/* model picker: the open model is always column 0; add up to 4 others (5 total) */}
-          <div className="cmp-picker">
-            {entries.map((e, i) => (
-              <span key={e.id} className="chip on" style={{ borderColor: BENCH_COLORS[i % BENCH_COLORS.length] }}>
-                <span className="chip-dot" style={{ background: BENCH_COLORS[i % BENCH_COLORS.length] }} />
-                {i === 0 ? `${e.title} (this)` : e.title}
-              </span>
-            ))}
-            {!running &&
-              others
-                .filter((p) => !selected.includes(p.id))
-                .map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className="chip"
-                    disabled={selected.length >= 4}
-                    onClick={() => toggleSelected(p.id)}
-                  >
-                    + {p.title}
-                  </button>
-                ))}
-          </div>
+          <ComparePicker
+            entries={entries}
+            others={others.filter((p) => !selected.includes(p.id))}
+            running={running}
+            canAdd={selected.length < 4}
+            onAdd={toggleSelected}
+            onRemove={toggleSelected}
+          />
 
           {/* the table rows double as the model selector for the detail panel below */}
           <BenchTable entries={entries} models={myModels} detail={detail} onSelect={setDetailId} expanded={expanded} />
@@ -788,6 +831,26 @@ function InferControls({ expanded, open, onToggle }: { expanded: boolean; open: 
   const titleOf = (id: string) => projects.find((p) => p.id === id)?.title ?? id;
 
   const [picked, setPicked] = useState<string[]>([]);
+
+  // reattach the inference benchmark after a reload: the worker keeps the last compare's results,
+  // so rehydrate the columns AND restore the compare selection (the other benchmarked models) from
+  // them, so every model comes back - not just the open one. Isolated to the owner, like training.
+  useEffect(() => {
+    let cancelled = false;
+    useBenchStore
+      .getState()
+      .follow()
+      .then(() => {
+        if (cancelled) return;
+        const bs = useBenchStore.getState();
+        if (bs.compareOwner === modelId && bs.columns.length > 1) {
+          setPicked(bs.columns.slice(1).map((c) => c.id));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [modelId]);
 
   const entries = useMemo<CompareEntry[]>(() => {
     const cur: CompareEntry = { id: modelId, graph: toGraph(), title: titleOf(modelId) };
@@ -1007,22 +1070,14 @@ function InferenceBenchmark({
       {open && (
         <div className="pan-body">
           {/* model picker: the open model is always column 0; add up to 4 others (5 total) */}
-          <div className="cmp-picker">
-            {entries.map((e, i) => (
-              <span key={e.id} className="chip on" style={{ borderColor: BENCH_COLORS[i % BENCH_COLORS.length] }}>
-                <span className="chip-dot" style={{ background: BENCH_COLORS[i % BENCH_COLORS.length] }} />
-                {i === 0 ? `${e.title} (this)` : e.title}
-              </span>
-            ))}
-            {!running &&
-              others
-                .filter((p) => !picked.includes(p.id))
-                .map((p) => (
-                  <button key={p.id} type="button" className="chip" disabled={picked.length >= 4} onClick={() => toggle(p.id)}>
-                    + {p.title}
-                  </button>
-                ))}
-          </div>
+          <ComparePicker
+            entries={entries}
+            others={others.filter((p) => !picked.includes(p.id))}
+            running={running}
+            canAdd={picked.length < 4}
+            onAdd={toggle}
+            onRemove={toggle}
+          />
 
           <InferBenchTable entries={entries} columns={columns} detail={detail} onSelect={onSelect} expanded={expanded} />
 
