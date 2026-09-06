@@ -17,7 +17,7 @@ import { api } from "@/lib/api";
 import { graphForProject, graphToCanvas } from "@/lib/graph";
 import { structuralIds } from "@/lib/structuralId";
 import type { GraphRequest } from "@/lib/types";
-import { type BenchColumn, useBenchStore } from "@/store/benchStore";
+import { type BenchColumn, type NodeProfile, useBenchStore } from "@/store/benchStore";
 import { type BenchModel, useBenchTrainStore } from "@/store/benchTrainStore";
 import {
   BATCH_MAX, BATCH_MIN, N_LAYER_MAX, N_LAYER_MIN, STEPS_MAX, STEPS_MIN,
@@ -140,8 +140,28 @@ function TrainControls({ expanded, open, onToggle }: { expanded: boolean; open: 
   const projects = useProjectsStore((s) => s.projects);
   const selected = useBenchTrainStore((s) => s.selected);
   const runStatus = useBenchTrainStore((s) => s.status);
+  const singleStatus = useTrainStore((s) => s.status);
 
   const titleOf = (id: string) => projects.find((p) => p.id === id)?.title ?? id;
+
+  // a run finishing saves weights, but CanvasStatus only re-polls model_status on graph edits, so the
+  // compiled/trained indicators (and the Generate gate) would stay "untrained" until a reload. When a
+  // run reaches a terminal state, re-poll the open model's status to refresh compileStore.
+  useEffect(() => {
+    if (singleStatus !== "completed" && runStatus !== "completed") return;
+    let cancelled = false;
+    api
+      .modelStatus({ id: modelId, graph: toGraph() })
+      .then((r) => {
+        if (cancelled) return;
+        const ready = r.status === "ready";
+        useCompileStore.getState().setResult(ready ? "ready" : "needs_compile", ready && !!r.trained);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [singleStatus, runStatus, modelId, toGraph]);
 
   // benchmark set = the open model (always column 0) + selected others, each as {id, graph, title}
   // biome deps: recompute when the graph or selection changes
@@ -157,7 +177,7 @@ function TrainControls({ expanded, open, onToggle }: { expanded: boolean; open: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelId, selected, projects, nodes, edges, meta]);
 
-  const infos = useCompareInfos(entries, runStatus);
+  const infos = useCompareInfos(entries, `${runStatus}|${singleStatus}`);
 
   return (
     <>
@@ -502,6 +522,10 @@ function TrainBenchmark({
   const owned = bench.models[0]?.id === modelId;
   const myModels = owned ? bench.models : [];
   const running = (bench.status === "running" || bench.status === "stopping") && owned;
+  // a plain training run for this project also locks the toggle - can't switch modes mid-run
+  const single = useTrainStore();
+  const singleRunning = (single.status === "running" || single.status === "stopping") && single.modelId === modelId;
+  const locked = running || singleRunning;
 
   const others = projects.filter((p) => p.id !== modelId);
 
@@ -519,7 +543,7 @@ function TrainBenchmark({
           className={`sw${open ? " on" : ""}`}
           aria-checked={open}
           aria-label={open ? "Disable benchmark" : "Enable benchmark"}
-          disabled={running}
+          disabled={locked}
           onClick={() => onToggle(!open)}
         >
           <span className="sw-knob" />
@@ -641,6 +665,22 @@ function BenchTable({
   );
 }
 
+// the profile has one entry per unrolled node (l0_rope, l1_rope, ...); collapse them onto their
+// logical id so the breakdown reads per node type (rope, qkv_proj, ...) with each type's total share
+function aggregateProfile(nodes: NodeProfile[]): NodeProfile[] {
+  const by = new Map<string, NodeProfile>();
+  for (const n of nodes) {
+    const g = by.get(n.logical_id);
+    if (g) {
+      g.self_us += n.self_us;
+      g.pct += n.pct;
+    } else {
+      by.set(n.logical_id, { ...n });
+    }
+  }
+  return [...by.values()].sort((a, b) => b.self_us - a.self_us);
+}
+
 function ModelDetail({
   info,
   model,
@@ -652,7 +692,7 @@ function ModelDetail({
   graph?: GraphRequest;
   expanded: boolean;
 }) {
-  const nodes = model?.bench?.profile.nodes ?? [];
+  const nodes = useMemo(() => aggregateProfile(model?.bench?.profile.nodes ?? []), [model]);
   // collapsed: top 8 with a "+N more" note; expanded: the full profile
   const top = expanded ? nodes : nodes.slice(0, 8);
   const more = nodes.length - top.length;
@@ -1025,7 +1065,7 @@ function InferDetail({
   const modelId = useCanvasStore((s) => s.modelId);
   const requestFocusNode = useCanvasStore((s) => s.requestFocusNode);
   const isOpenModel = column?.id === modelId;
-  const profNodes = column?.profile ?? [];
+  const profNodes = useMemo(() => aggregateProfile(column?.profile ?? []), [column]);
   const top = expanded ? profNodes : profNodes.slice(0, 8);
   const more = profNodes.length - top.length;
   const names = useMemo(() => {

@@ -578,8 +578,7 @@ class Worker:
         tokens = []
 
         # rotary positions (a rope node) make the KVCache rollable: decoding stays incremental past
-        # the context window (the cache evicts oldest). Absolute position_embedding graphs instead
-        # recompute the window on overflow. `rolling` picks which path the loop below takes.
+        # the context window (the cache evicts oldest)
         rolling = "rope" in model.node_types.values()
 
         if bench:
