@@ -547,7 +547,7 @@ function BenchTable({
   const cell = (v: number | null | undefined, d: number) => (v != null ? v.toFixed(d) : "—");
 
   return (
-    <div className="cmp-scroll">
+    <div className="bt-wrap">
       <table className="bt-table mono">
         <thead>
           <tr>
