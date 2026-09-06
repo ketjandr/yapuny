@@ -234,6 +234,62 @@
   font-size: 9.5px;
   color: var(--faint);
 }
+
+/* pressable "?" help + its click-persistent popover (click-away / Escape closes it) */
+.help-dot {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+}
+.cfg-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line3);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.cfg-help:hover {
+  color: var(--txt2);
+  border-color: var(--muted);
+}
+.cfg-help.on {
+  color: var(--ice);
+  border-color: var(--ice-dim);
+  background: color-mix(in srgb, var(--ice) 12%, transparent);
+}
+/* matches the app tooltip (.tt): borderless near-black grey chip, light text, soft shadow */
+.help-pop {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: 220px;
+  padding: 8px 11px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--txt);
+  background: var(--line);
+  border-radius: 7px;
+  box-shadow: 0 14px 32px -14px #000;
+  white-space: normal;
+  opacity: 0.96;
+  animation: tt-in 0.09s ease-out;
+}
 .cfg-num {
   width: 66px;
   text-align: right;
@@ -330,6 +386,87 @@
 }
 .hp-in:focus {
   border-color: var(--line3);
+}
+.hp-in:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* lr preset dropdown: a custom themed <select> (native popup can't match the dark UI) */
+.lr-sel {
+  position: relative;
+}
+.lr-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  cursor: pointer;
+}
+.lr-btn::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg) translate(-1px, -1px);
+  transition: transform 0.12s ease;
+}
+.lr-sel.open .lr-btn {
+  border-color: var(--line3);
+}
+.lr-sel.open .lr-btn::after {
+  transform: rotate(-135deg) translate(-1px, -1px);
+}
+.lr-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 4px;
+  margin: 0;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  box-shadow: 0 18px 44px -22px #000;
+  /* slim themed scrollbar (same as the benchmark table) instead of the chunky OS one */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line3) transparent;
+}
+.lr-menu::-webkit-scrollbar {
+  width: 6px;
+}
+.lr-menu::-webkit-scrollbar-thumb {
+  background: var(--line3);
+  border-radius: 3px;
+}
+.lr-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+.lr-opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--txt2);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.lr-opt:hover {
+  background: var(--panel2);
+  color: var(--txt);
+}
+.lr-opt.sel {
+  background: color-mix(in srgb, var(--ice) 16%, var(--panel));
+  color: var(--txt);
 }
 
 /* buttons */

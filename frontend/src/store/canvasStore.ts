@@ -24,6 +24,7 @@ import {
   type CompiledSnapshot,
   loadCanvas,
   type PersistedCanvas,
+  type TrainHp,
   writeCanvas,
 } from "@/lib/persist";
 import type { GraphMetaSchema, GraphRequest } from "@/lib/types";
@@ -34,6 +35,13 @@ const blank = blankToCanvas();
 
 export const N_LAYER_MIN = 1;
 export const N_LAYER_MAX = 16; // block loop count bound; shared by the config slider + block stepper
+
+// training hyperparameter bounds + defaults (steps/batch clamp; lr picked from a preset list in UI)
+export const STEPS_MIN = 1;
+export const STEPS_MAX = 20000;
+export const BATCH_MIN = 1;
+export const BATCH_MAX = 512;
+export const DEFAULT_TRAIN: TrainHp = { maxSteps: 500, batchSize: 16, learningRate: 3e-4 };
 
 // View mode; the hook point for mode-specific rendering (grey kv_cache, T/S, fusion/quant).
 export type CanvasMode = "train" | "inference";
@@ -89,6 +97,7 @@ interface CanvasState {
   blockEnd: string | null;
   clipboard: Clipboard | null;
   benchOpen: { train: boolean; inference: boolean }; // benchmark section toggle, persisted per mode
+  train: TrainHp; // training hyperparameters (steps/batch/lr), persisted per project
   focusRequest: { id: string; nonce: number } | null; // pan-to-node request (from the profiler); not persisted
 
   onNodesChange: (changes: NodeChange[]) => void;
@@ -113,6 +122,7 @@ interface CanvasState {
   revertToCompiled: () => void;
   setMode: (mode: CanvasMode) => void;
   setBenchOpen: (mode: CanvasMode, open: boolean) => void;
+  setTrainHp: (patch: Partial<TrainHp>) => void;
   setViewport: (vp: Viewport) => void;
   requestFocusNode: (id: string) => void; // ask the canvas to pan to a node (no-op'd by canvas if absent)
   setSaveStatus: (status: "saving" | "saved") => void;
@@ -180,6 +190,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   blockEnd: null,
   clipboard: null,
   benchOpen: { train: false, inference: false },
+  train: DEFAULT_TRAIN,
   focusRequest: null,
 
   // needsCompile/trained are NOT tracked here — the backend (worker model cache + weight locker) is
@@ -372,6 +383,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }),
   setMode: (mode) => set({ mode }), // not a graph edit -> no needsCompile
   setBenchOpen: (mode, open) => set((s) => ({ benchOpen: { ...s.benchOpen, [mode]: open } })),
+
+  setTrainHp: (patch) => set((s) => ({ train: { ...s.train, ...patch } })),
   setViewport: (viewport) => set({ viewport }), // pan/zoom is cosmetic -> no needsCompile
 
   // nonce makes each request distinct so the canvas re-pans even to the same node twice in a row
@@ -401,6 +414,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       viewport: c.viewport,
       lastCompiled: c.lastCompiled,
       benchOpen: c.benchOpen ?? { train: false, inference: false },
+      train: c.train ?? DEFAULT_TRAIN,
       modelId: id,
       selectedId: null,
       saveStatus: "saved",
@@ -434,6 +448,7 @@ function persistableOf(s: CanvasState): PersistedCanvas {
     blockStart: s.blockStart,
     blockEnd: s.blockEnd,
     benchOpen: s.benchOpen,
+    train: s.train,
   };
 }
 

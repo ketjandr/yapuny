@@ -6,8 +6,9 @@
 // The Benchmark toggle is persisted per project per mode and doubles as "benchmarking enabled";
 // it's locked while a run is in flight. Wired to the worker over SSE (trainStore / benchTrainStore /
 // benchStore). Collapsible + full-view expandable via PaneShell.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CorpusButton } from "@/components/CorpusModal";
+import { HelpDot } from "@/components/HelpDot";
 import { useTooltip } from "@/components/tooltipContext";
 import { api } from "@/lib/api";
 import { graphForProject, graphToCanvas } from "@/lib/graph";
@@ -15,7 +16,7 @@ import { structuralIds } from "@/lib/structuralId";
 import type { GraphRequest } from "@/lib/types";
 import { useBenchStore } from "@/store/benchStore";
 import { type BenchModel, useBenchTrainStore } from "@/store/benchTrainStore";
-import { N_LAYER_MAX, N_LAYER_MIN, useCanvasStore } from "@/store/canvasStore";
+import { BATCH_MAX, BATCH_MIN, N_LAYER_MAX, N_LAYER_MIN, STEPS_MAX, STEPS_MIN, useCanvasStore } from "@/store/canvasStore";
 import { useCompileStore } from "@/store/compileStore";
 import { toast } from "@/store/toastStore";
 import { useProjectsStore } from "@/store/projectsStore";
@@ -194,10 +195,11 @@ function ConfigSection({ expanded }: { expanded: boolean }) {
     <section className="grp">
       <h3>Config</h3>
       <div className={`cfg${expanded ? " grid2" : ""}`}>
-        <CfgSlider label="n_layer" value={meta.n_layer} min={N_LAYER_MIN} max={N_LAYER_MAX} step={1} onChange={(v) => setMeta({ n_layer: v })} />
-        <CfgSlider label="n_head" value={meta.n_head} min={1} max={16} step={1} onChange={(v) => setMeta({ n_head: v })} />
+        <CfgSlider label="n_layer" help="Transformer blocks stacked in a row, each refining the model's understanding. How many times the canvas block repeats." value={meta.n_layer} min={N_LAYER_MIN} max={N_LAYER_MAX} step={1} onChange={(v) => setMeta({ n_layer: v })} />
+        <CfgSlider label="n_head" help="Attention heads per block. Each spots a different relationship between tokens - grammar, meaning, position." value={meta.n_head} min={1} max={16} step={1} onChange={(v) => setMeta({ n_head: v })} />
         <CfgSlider
           label="n_embd"
+          help="How much information each token carries through the model - wider holds more nuance."
           hint={`head_dim ${Math.floor(meta.n_embd / meta.n_head)}`}
           value={meta.n_embd}
           min={meta.n_head}
@@ -206,9 +208,9 @@ function ConfigSection({ expanded }: { expanded: boolean }) {
           snap={snapEmbd}
           onChange={(v) => setMeta({ n_embd: v })}
         />
-        <CfgSlider label="block_size" value={meta.block_size} min={16} max={1024} step={16} onChange={(v) => setMeta({ block_size: v })} />
-        <CfgSlider label="dropout" value={meta.dropout} min={0} max={0.5} step={0.05} float onChange={(v) => setMeta({ dropout: v })} />
-        <CfgSlider label="vocab_size" value={meta.vocab_size} min={256} max={50000} step={256} onChange={(v) => setMeta({ vocab_size: v })} />
+        <CfgSlider label="block_size" help="Context window - how many tokens back the model can look when predicting the next. Longer sees more but trains slower." value={meta.block_size} min={16} max={1024} step={16} onChange={(v) => setMeta({ block_size: v })} />
+        <CfgSlider label="dropout" help="Randomly ignores part of the network each step so it can't just memorize the corpus - pushing it to generalize." value={meta.dropout} min={0} max={0.5} step={0.05} float onChange={(v) => setMeta({ dropout: v })} />
+        <CfgSlider label="vocab_size" help="How many distinct tokens (word-pieces) the model knows, learned from your corpus. More captures rarer words but costs more." value={meta.vocab_size} min={256} max={50000} step={256} onChange={(v) => setMeta({ vocab_size: v })} />
       </div>
     </section>
   );
@@ -217,6 +219,7 @@ function ConfigSection({ expanded }: { expanded: boolean }) {
 function CfgSlider({
   label,
   hint,
+  help,
   value,
   min,
   max,
@@ -227,6 +230,7 @@ function CfgSlider({
 }: {
   label: string;
   hint?: string;
+  help?: string; // plain-language explanation shown from the pressable "?" popover
   value: number;
   min: number;
   max: number;
@@ -240,6 +244,7 @@ function CfgSlider({
       <div className="cfg-row">
         <span className="cfg-k">
           {label}
+          {help && <HelpDot label={label} text={help} />}
           {hint && <span className="cfg-hint">{hint}</span>}
         </span>
         <NumField value={value} min={min} max={max} float={float} snap={snap} onCommit={onChange} />
@@ -248,6 +253,7 @@ function CfgSlider({
     </div>
   );
 }
+
 
 function NumField({
   value,
@@ -312,9 +318,9 @@ function TrainSection({
   const single = useTrainStore();
   const bench = useBenchTrainStore();
 
-  const [steps, setSteps] = useState("500");
-  const [batch, setBatch] = useState("16");
-  const [lr, setLr] = useState("3e-4");
+  // hyperparameters are per-project (persisted in the canvas store), not ephemeral component state
+  const train = useCanvasStore((s) => s.train);
+  const setTrainHp = useCanvasStore((s) => s.setTrainHp);
 
   // (reconnect to an in-progress run + selection restore is handled once in RightPane)
 
@@ -345,9 +351,9 @@ function TrainSection({
   const canStart = benchOn ? allCompiled : compiledCurrent;
 
   const hp = () => ({
-    max_steps: Math.max(1, Math.round(Number(steps)) || 500),
-    batch_size: Math.max(1, Math.round(Number(batch)) || 16),
-    learning_rate: Number(lr) || 3e-4,
+    max_steps: train.maxSteps,
+    batch_size: train.batchSize,
+    learning_rate: train.learningRate,
   });
 
   const onTrain = async () => {
@@ -422,9 +428,9 @@ function TrainSection({
           <Stat label="steps/s" value={sps != null ? sps.toFixed(1) : "—"} />
         </div>
         <div className="hp-row">
-          <HPField label="steps" value={steps} onChange={setSteps} disabled={running} />
-          <HPField label="batch" value={batch} onChange={setBatch} disabled={running} />
-          <HPField label="lr" value={lr} onChange={setLr} disabled={running} />
+          <HpNumField label="steps" value={train.maxSteps} min={STEPS_MIN} max={STEPS_MAX} onCommit={(v) => setTrainHp({ maxSteps: v })} disabled={running} />
+          <HpNumField label="batch" value={train.batchSize} min={BATCH_MIN} max={BATCH_MAX} onCommit={(v) => setTrainHp({ batchSize: v })} disabled={running} />
+          <LrField value={train.learningRate} onChange={(v) => setTrainHp({ learningRate: v })} disabled={running} />
         </div>
         <span className="btn-wrap" {...tip}>
           <button
@@ -668,7 +674,7 @@ function ModelDetail({
                 key={n.node_id}
                 label={labels[i]}
                 pct={n.pct}
-                sub={`${n.pct.toFixed(0)}%`}
+                sub={`${n.pct.toFixed(1)}%`}
                 labelCh={labelCh}
                 onClick={expanded || !isOpenModel ? undefined : () => requestFocusNode(n.logical_id)}
               />
@@ -781,7 +787,7 @@ function ProfilePanel({ expanded }: { expanded: boolean }) {
                 key={n.node_id}
                 label={labels[i]}
                 pct={n.pct}
-                sub={`${n.pct.toFixed(0)}%`}
+                sub={`${n.pct.toFixed(1)}%`}
                 labelCh={labelCh}
                 onClick={expanded ? undefined : () => requestFocusNode(n.logical_id)}
               />
@@ -928,11 +934,103 @@ function HP({ label, def }: { label: string; def: string }) {
   );
 }
 
-function HPField({ label, value, onChange, disabled }: { label: string; value: string; onChange: (v: string) => void; disabled?: boolean }) {
+// labeled integer field for the hp-row: free typing, clamp to [min, max] on blur/Enter
+function HpNumField({
+  label,
+  value,
+  min,
+  max,
+  onCommit,
+  disabled,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (v: number) => void;
+  disabled?: boolean;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const commit = () => {
+    const n = Number(text);
+    if (!Number.isFinite(n)) {
+      setText(String(value));
+      return;
+    }
+    const clamped = Math.min(max, Math.max(min, Math.round(n)));
+    onCommit(clamped);
+    setText(String(clamped));
+  };
   return (
     <label className="hp">
       <span className="hp-k">{label}</span>
-      <input className="hp-in mono" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+      <input
+        className="hp-in mono"
+        type="text"
+        inputMode="numeric"
+        value={text}
+        disabled={disabled}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      />
+    </label>
+  );
+}
+
+// learning rate as a preset dropdown - avoids typing "3e-4" and keeps the value sensible
+const LR_PRESETS = [1e-2, 5e-3, 3e-3, 1e-3, 5e-4, 3e-4, 1e-4, 5e-5, 3e-5, 1e-5];
+const fmtLr = (v: number) => v.toExponential(0); // e.g. 3e-4
+
+// custom (themed) dropdown - the native <select> popup can't be styled to match the dark UI
+function LrField({ value, onChange, disabled }: { value: number; onChange: (v: number) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  // include the current value if it isn't one of the presets (e.g. an older persisted number)
+  const options = LR_PRESETS.includes(value) ? LR_PRESETS : [value, ...LR_PRESETS].sort((a, b) => b - a);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <label className="hp">
+      <span className="hp-k">lr</span>
+      <div className={`lr-sel${open ? " open" : ""}`} ref={ref}>
+        <button
+          type="button"
+          className="hp-in lr-btn mono"
+          disabled={disabled}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {fmtLr(value)}
+        </button>
+        {open && (
+          <ul className="lr-menu mono" role="listbox">
+            {options.map((v) => (
+              <li key={v}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={v === value}
+                  className={`lr-opt${v === value ? " sel" : ""}`}
+                  onClick={() => { onChange(v); setOpen(false); }}
+                >
+                  {fmtLr(v)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </label>
   );
 }

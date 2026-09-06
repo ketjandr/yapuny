@@ -17,11 +17,19 @@ export interface CompiledSnapshot {
   blockEnd: string | null;
 }
 
+// per-project training hyperparameters (remembered per model, like the config in meta)
+export interface TrainHp {
+  maxSteps: number;
+  batchSize: number;
+  learningRate: number;
+}
+
 export interface PersistedCanvas extends CompiledSnapshot {
   mode: "train" | "inference";
   lastCompiled: CompiledSnapshot | null;
   viewport: Viewport | null;
   benchOpen?: { train: boolean; inference: boolean }; // benchmark section toggle, per mode
+  train?: TrainHp; // training hyperparameters (steps/batch/lr)
 }
 
 // reset transient flags so selection/drag state neither triggers a save nor persists

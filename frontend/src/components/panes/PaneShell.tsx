@@ -2,9 +2,6 @@
 // collapse/expand chrome lives in exactly one place. It owns the collapse-to-rail state and the
 // edge handle; the full-view overlay is opt-in (pass `onToggleExpand`). `expanded` stays controlled
 // by the consumer so a pane's own content can react to the full-view layout (e.g. wider grids).
-//
-// `side` mirrors the chrome symmetrically: the collapse handle sits on the pane's inner edge and
-// the reopen tab docks to the matching screen edge, with the chevrons pointing the way it travels.
 import { type ReactNode, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTooltip } from "@/components/tooltipContext";

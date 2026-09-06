@@ -336,12 +336,23 @@ class Worker:
         optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
         fwd_times: list[float] = []
         bwd_times: list[float] = []
+        step_dts: list[float] = []
+        prev = None
         completed = True
 
         for step in range(max_steps):
             if not self.training:
                 completed = False
                 break
+
+            # GPU work is async (kernels only enqueue), but loss.item() below pulls a scalar to CPU,
+            # blocking until the step's kernels finish
+            now = time.perf_counter()
+            if prev is not None:
+                step_dts.append(now - prev)
+                recent = step_dts[-10:]
+                state["steps_per_sec"] = len(recent) / sum(recent)
+            prev = now
 
             x, y = self._get_batch(train_data, block_size, batch_size)
 
@@ -365,8 +376,6 @@ class Worker:
             if bench:
                 fwd_times.append((t_fwd - t0) * 1000)
                 bwd_times.append((t_bwd - t_fwd) * 1000)
-                recent = [f + b for f, b in zip(fwd_times[-10:], bwd_times[-10:])]
-                state["steps_per_sec"] = 1000.0 / (sum(recent) / len(recent))
 
         model.eval()
         return completed, fwd_times, bwd_times
