@@ -73,6 +73,9 @@ def _flash_attention_kernel(
         # compute raw attention scores
         s_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
 
+        # mask padding keys (loaded as 0) so they stay out of the softmax
+        s_tile = tl.where(kn_offsets[None, :] < seq_len_k, s_tile, float("-inf"))
+
         # causal mask with q aligned to the end of k/v
         # (needed when seq_len_q < seq_len_k, e.g. during decode seq_len_q == 1)
         if is_causal:
