@@ -40,20 +40,36 @@ class RoPE(nn.Module):
         # inverse frequencies for each rotation plane (half of head_dim planes)
         inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2).float() / head_dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
+        # cached cos/sin for the training positions, keyed on (T, device, dtype)
+        self._cache_key: tuple | None = None
+        self._cos: torch.Tensor | None = None
+        self._sin: torch.Tensor | None = None
 
     @staticmethod
     def _rotate_half(x: torch.Tensor) -> torch.Tensor:
         x1, x2 = x.chunk(2, dim=-1)
         return torch.cat((-x2, x1), dim=-1)
 
+    def _cos_sin(self, positions: torch.Tensor, dtype: torch.dtype):
+        freqs = torch.outer(positions.float(), self.inv_freq)  # (T, head_dim/2)
+        emb = torch.cat((freqs, freqs), dim=-1)  # (T, head_dim)
+        # (1, 1, T, head_dim)
+        return emb.cos()[None, None].to(dtype), emb.sin()[None, None].to(dtype)
+
     def forward(
         self, q: torch.Tensor, k: torch.Tensor, positions: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        # q, k: (B, n_head, T, head_dim); positions: (T,), absolute, can grow unbounded
-        freqs = torch.outer(positions.float(), self.inv_freq)  # (T, head_dim/2)
-        emb = torch.cat((freqs, freqs), dim=-1)  # (T, head_dim)
-        cos = emb.cos()[None, None]  # (1, 1, T, head_dim)
-        sin = emb.sin()[None, None]
+        # q, k: (B, n_head, T, head_dim); positions: (T,), absolute, can grow unbounded.
+        # cos/sin depend only on positions. In training positions are a fixed arange(0, T) reused
+        # every step, so cache them and rebuild only when shape/device/dtype changes (never mid-run).
+        # Inference passes new positions each step, so recompute there (cheap at T=1).
+        key = (positions.shape[0], positions.device, q.dtype)
+        if self.training and self._cache_key == key:
+            cos, sin = self._cos, self._sin
+        else:
+            cos, sin = self._cos_sin(positions, q.dtype)
+            if self.training:
+                self._cache_key, self._cos, self._sin = key, cos, sin
         q_rot = (q * cos) + (self._rotate_half(q) * sin)
         k_rot = (k * cos) + (self._rotate_half(k) * sin)
         return q_rot.type_as(q), k_rot.type_as(k)
