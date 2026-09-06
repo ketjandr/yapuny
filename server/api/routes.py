@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 
 import torch
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile
 from starlette.responses import StreamingResponse
 
 from server.api.schemas import (
@@ -21,8 +22,27 @@ from server.api.schemas import (
 )
 from worker.worker import Worker
 
-router = APIRouter(prefix="/api")
+# Optional bearer token: when WORKER_TOKEN is set the worker rejects any /api request without a
+# matching "Authorization: Bearer <token>". Unset (local dev / trusted host) leaves the worker open.
+# CORS preflight (OPTIONS) is handled by the middleware and never hits this dependency.
+_WORKER_TOKEN = os.environ.get("WORKER_TOKEN", "").strip()
+
+
+def require_token(authorization: str = Header(default="")):
+    if _WORKER_TOKEN and authorization != f"Bearer {_WORKER_TOKEN}":
+        raise HTTPException(status_code=401, detail="invalid or missing worker token")
+
+
+router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 worker = Worker()
+
+
+@router.get("/health", tags=["worker"])
+def health():
+    # liveness + device for the Connect check (token-protected, so it also validates the token)
+    dev = worker.device
+    gpu = torch.cuda.get_device_name(dev) if dev.type == "cuda" else None
+    return {"status": "ok", "device": str(dev), "gpu": gpu}
 
 
 # -- Graph --
