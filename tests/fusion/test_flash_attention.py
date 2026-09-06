@@ -28,7 +28,9 @@ def naive_attention(q, k, v, is_causal=True):
     scale = q.shape[-1] ** -0.5
     s = q @ k.transpose(-2, -1) * scale
     if is_causal:
-        mask = torch.tril(torch.ones(s.shape[-2], s.shape[-1], device=s.device))
+        # aligned to the end (decode: q is the last T_q of T_k), same as the kernel
+        t_q, t_k = s.shape[-2], s.shape[-1]
+        mask = torch.tril(torch.ones(t_q, t_k, device=s.device), diagonal=t_k - t_q)
         s = s.masked_fill(mask == 0, float("-inf"))
     p = torch.softmax(s, dim=-1)
     return p @ v
@@ -80,6 +82,40 @@ class TestCorrectness:
         module = FlashAttention(is_causal=True)
         expected = sdpa_attention(q, k, v, is_causal=True)
         actual = module(q, k, v)
+        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+
+
+class TestDecode:
+    # q shorter than k/v: incremental decode against a cached window (T_q=1) and chunks (T_q<T_k)
+    def test_single_query_full_window(self):
+        torch.manual_seed(0)
+        n = 100  # not a multiple of BLOCK_N=64
+        q = torch.randn(1, H, 1, D, device=DEVICE)
+        k = torch.randn(1, H, n, D, device=DEVICE)
+        v = torch.randn(1, H, n, D, device=DEVICE)
+        expected = naive_attention(q, k, v, is_causal=True)
+        actual = flash_attention(q, k, v, is_causal=True)
+        torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+
+    def test_single_query_causal_equals_unmasked(self):
+        # a lone query sees every past key, so the causal mask is a no-op
+        torch.manual_seed(1)
+        n = 48
+        q = torch.randn(1, H, 1, D, device=DEVICE)
+        k = torch.randn(1, H, n, D, device=DEVICE)
+        v = torch.randn(1, H, n, D, device=DEVICE)
+        causal = flash_attention(q, k, v, is_causal=True)
+        unmasked = flash_attention(q, k, v, is_causal=False)
+        torch.testing.assert_close(causal, unmasked, atol=1e-2, rtol=1e-2)
+
+    def test_chunk_shorter_than_window(self):
+        torch.manual_seed(2)
+        t_q, t_k = 5, 40
+        q = torch.randn(1, H, t_q, D, device=DEVICE)
+        k = torch.randn(1, H, t_k, D, device=DEVICE)
+        v = torch.randn(1, H, t_k, D, device=DEVICE)
+        expected = naive_attention(q, k, v, is_causal=True)
+        actual = flash_attention(q, k, v, is_causal=True)
         torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
 

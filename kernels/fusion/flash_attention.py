@@ -27,7 +27,8 @@ def _flash_attention_kernel(
     stride_om,
     stride_ok,
     n_heads,
-    seq_len,
+    seq_len_q,  # Q rows (1 at decode)
+    seq_len_k,  # K/V cols (cached window)
     scale,
     is_causal: tl.constexpr,
     BLOCK_M: tl.constexpr,  # block size for Q (rows)
@@ -52,7 +53,7 @@ def _flash_attention_kernel(
 
     # load q tensor tile
     q_ptrs = q_base + qm_offsets[:, None] * stride_qm + dk_offsets[None, :] * stride_qk
-    mask_q = qm_offsets[:, None] < seq_len
+    mask_q = qm_offsets[:, None] < seq_len_q
     q_tile = tl.load(q_ptrs, mask=mask_q, other=0.0)  # (BLOCK_M, HEAD_DIM)
 
     # initialize accumulated softmax numerator and running max/sum
@@ -61,19 +62,21 @@ def _flash_attention_kernel(
     l = tl.zeros((BLOCK_M,), dtype=tl.float32)  # running row-wise sum
 
     # tiled attention matrix computation
-    for j in range(tl.cdiv(seq_len, BLOCK_N)):
+    for j in range(tl.cdiv(seq_len_k, BLOCK_N)):
         kn_offsets = j * BLOCK_N + tl.arange(0, BLOCK_N)
 
         # load k tensor tile
         k_ptrs = k_base + kn_offsets[:, None] * stride_kn + dk_offsets[None, :] * stride_kk
-        mask_k = kn_offsets[:, None] < seq_len
+        mask_k = kn_offsets[:, None] < seq_len_k
         k_tile = tl.load(k_ptrs, mask=mask_k, other=0.0)  # (BLOCK_N, HEAD_DIM)
 
+        # compute raw attention scores
         s_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
 
-        # apply causal mask
+        # causal mask with q aligned to the end of k/v
+        # (needed when seq_len_q < seq_len_k, e.g. during decode seq_len_q == 1)
         if is_causal:
-            causal_mask = qm_offsets[:, None] >= kn_offsets[None, :]
+            causal_mask = qm_offsets[:, None] + (seq_len_k - seq_len_q) >= kn_offsets[None, :]
             s_tile = tl.where(causal_mask, s_tile, float("-inf"))
 
         # load v tensor tile
@@ -103,15 +106,16 @@ def _flash_attention_kernel(
 
 
 def flash_attention(
-    q: torch.Tensor,  # (B, H, T, D)
-    k: torch.Tensor,  # (B, H, T, D)
-    v: torch.Tensor,  # (B, H, T, D)
+    q: torch.Tensor,  # (B, H, T_q, D)
+    k: torch.Tensor,  # (B, H, T_k, D), where T_k >= T_q (decode: T_q=1, T_k=cached window)
+    v: torch.Tensor,  # (B, H, T_k, D)
     is_causal: bool = True,
 ) -> torch.Tensor:
-    B, H, T, D = q.shape
+    B, H, T_q, D = q.shape
+    T_k = k.shape[2]
     scale = D**-0.5
 
-    out = torch.empty_like(q)
+    out = torch.empty_like(q)  # (B, H, T_q, D)
 
     # block sizes
     BLOCK_M = 64
@@ -120,7 +124,7 @@ def flash_attention(
     HEAD_DIM = triton.next_power_of_2(D)
 
     # grid: one program per (q_block, batch*head)
-    grid = (triton.cdiv(T, BLOCK_M), B * H)
+    grid = (triton.cdiv(T_q, BLOCK_M), B * H)
 
     _flash_attention_kernel[grid](
         q,
@@ -144,7 +148,8 @@ def flash_attention(
         out.stride(2),
         out.stride(3),
         n_heads=H,
-        seq_len=T,
+        seq_len_q=T_q,
+        seq_len_k=T_k,
         scale=scale,
         is_causal=is_causal,
         BLOCK_M=BLOCK_M,
@@ -165,7 +170,10 @@ def _reference_attention(
     scores = torch.matmul(q, k.transpose(-2, -1)) * scale
     if is_causal:
         t_q, t_k = scores.shape[-2], scores.shape[-1]
-        causal = torch.tril(torch.ones(t_q, t_k, device=scores.device, dtype=torch.bool))
+        # aligned to the end so q's last row attends to all of k (matches the kernel)
+        causal = torch.tril(
+            torch.ones(t_q, t_k, device=scores.device, dtype=torch.bool), diagonal=t_k - t_q
+        )
         scores = scores.masked_fill(~causal, float("-inf"))
     attn = torch.softmax(scores, dim=-1)
     return torch.matmul(attn, v)
