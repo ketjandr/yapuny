@@ -63,18 +63,23 @@ def _block_key(graph: GraphSpec) -> list[str]:
 
 
 def graph_structure_hash(graph: GraphSpec) -> str:
-    # excludes inference-based transforms like fusion and quantization
-    nodes = sorted([(n.id, n.type, sorted(n.config.items())) for n in graph.nodes])
-    edges = sorted([(e.from_node, e.from_port, e.to_node, e.to_port) for e in graph.edges])
+    # excludes inference-based transforms like fusion and quantization.
+    # hash the pruned graph (what compile actually builds), so orphan / dead-end nodes that never
+    # reach the output don't change identity
+    pruned = flow_subgraph(graph)
+    nodes = sorted([(n.id, n.type, sorted(n.config.items())) for n in pruned.nodes])
+    edges = sorted([(e.from_node, e.from_port, e.to_node, e.to_port) for e in pruned.edges])
     meta = sorted(asdict(graph.meta).items())
     blob = json.dumps([nodes, edges, meta, _block_key(graph)], default=str).encode()
     return hashlib.sha256(blob).hexdigest()
 
 
 def graph_full_hash(graph: GraphSpec) -> str:
-    # includes all train and inference-based transforms
-    nodes = sorted([(n.id, n.type, n.quantized, sorted(n.config.items())) for n in graph.nodes])
-    edges = sorted([(e.from_node, e.from_port, e.to_node, e.to_port) for e in graph.edges])
+    # includes all train and inference-based transforms; hashes the pruned graph like the structure
+    # hash above, so a disconnected node doesn't mark the compiled model dirty
+    pruned = flow_subgraph(graph)
+    nodes = sorted([(n.id, n.type, n.quantized, sorted(n.config.items())) for n in pruned.nodes])
+    edges = sorted([(e.from_node, e.from_port, e.to_node, e.to_port) for e in pruned.edges])
     meta = sorted(asdict(graph.meta).items())
     fusion = sorted(sorted(fg.nodes) for fg in graph.fusion_groups)
     blob = json.dumps([nodes, edges, meta, fusion, _block_key(graph)], default=str).encode()
