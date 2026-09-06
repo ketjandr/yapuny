@@ -89,6 +89,7 @@ interface CanvasState {
   blockEnd: string | null;
   clipboard: Clipboard | null;
   benchOpen: { train: boolean; inference: boolean }; // benchmark section toggle, persisted per mode
+  focusRequest: { id: string; nonce: number } | null; // pan-to-node request (from the profiler); not persisted
 
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
@@ -113,6 +114,7 @@ interface CanvasState {
   setMode: (mode: CanvasMode) => void;
   setBenchOpen: (mode: CanvasMode, open: boolean) => void;
   setViewport: (vp: Viewport) => void;
+  requestFocusNode: (id: string) => void; // ask the canvas to pan to a node (no-op'd by canvas if absent)
   setSaveStatus: (status: "saving" | "saved") => void;
   loadProject: (id: string) => void;
 
@@ -178,6 +180,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   blockEnd: null,
   clipboard: null,
   benchOpen: { train: false, inference: false },
+  focusRequest: null,
 
   // needsCompile/trained are NOT tracked here — the backend (worker model cache + weight locker) is
   // the source of truth, surfaced via compileStore. Edits just mutate the graph.
@@ -370,6 +373,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setMode: (mode) => set({ mode }), // not a graph edit -> no needsCompile
   setBenchOpen: (mode, open) => set((s) => ({ benchOpen: { ...s.benchOpen, [mode]: open } })),
   setViewport: (viewport) => set({ viewport }), // pan/zoom is cosmetic -> no needsCompile
+
+  // nonce makes each request distinct so the canvas re-pans even to the same node twice in a row
+  requestFocusNode: (id) => set({ focusRequest: { id, nonce: Date.now() } }),
   setSaveStatus: (saveStatus) => set({ saveStatus }),
 
   // swap a project's canvas into the editor (called on entering the playground). Autosave is

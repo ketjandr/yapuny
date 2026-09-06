@@ -9,7 +9,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTooltip } from "@/components/tooltipContext";
 import { api } from "@/lib/api";
-import { graphForProject } from "@/lib/graph";
+import { graphForProject, graphToCanvas } from "@/lib/graph";
+import { structuralIds } from "@/lib/structuralId";
 import type { GraphRequest } from "@/lib/types";
 import { useBenchStore } from "@/store/benchStore";
 import { type BenchModel, useBenchTrainStore } from "@/store/benchTrainStore";
@@ -430,7 +431,7 @@ function otherBusyId(single: { modelId: string | null }, bench: { models: BenchM
 function RunNote({ status, error, saved, bench }: { status: string; error: string | null; saved: boolean; bench: boolean }) {
   if (status === "error") return <div className="run-note bad">{error ?? "training failed"}</div>;
   if (status === "stopped") return <div className="run-note">training stopped - not saved (last trained weights kept)</div>;
-  if (saved) return <div className="run-note ok">{bench ? "✓ benchmark complete — models trained & saved" : "✓ trained & saved"}</div>;
+  if (saved) return <div className="run-note ok">{bench ? "✓ benchmark complete - models trained & saved" : "✓ trained & saved"}</div>;
   return null;
 }
 
@@ -509,11 +510,16 @@ function TrainBenchmark({
           </div>
 
           {/* the table rows double as the model selector for the detail panel below */}
-          <BenchTable entries={entries} models={myModels} detail={detail} onSelect={setDetailId} />
+          <BenchTable entries={entries} models={myModels} detail={detail} onSelect={setDetailId} expanded={expanded} />
 
           {/* per-model detail: config + params + node profile, for the selected row */}
           <div className="bench-detail">
-            <ModelDetail info={infos[detail]?.info ?? null} model={myModels.find((m) => m.id === detail) ?? null} expanded={expanded} />
+            <ModelDetail
+              info={infos[detail]?.info ?? null}
+              model={myModels.find((m) => m.id === detail) ?? null}
+              graph={entries.find((e) => e.id === detail)?.graph}
+              expanded={expanded}
+            />
           </div>
         </div>
       )}
@@ -528,11 +534,13 @@ function BenchTable({
   models,
   detail,
   onSelect,
+  expanded,
 }: {
   entries: CompareEntry[];
   models: BenchModel[];
   detail?: string;
   onSelect: (id: string) => void;
+  expanded: boolean;
 }) {
   const byId = new Map(models.map((m) => [m.id, m]));
   const maxSps = Math.max(1, ...models.map((m) => m.bench?.steps_per_sec ?? 0));
@@ -568,9 +576,12 @@ function BenchTable({
                   {b ? (
                     <span className="bt-tp-wrap">
                       <span className="bt-tp-num">{b.steps_per_sec.toFixed(1)}</span>
-                      <span className="bb-track">
-                        <span className="bb-fill" style={{ width: `${(b.steps_per_sec / maxSps) * 100}%`, background: color }} />
-                      </span>
+                      {/* the throughput bar only adds value with the room of full view */}
+                      {expanded && (
+                        <span className="bb-track">
+                          <span className="bb-fill" style={{ width: `${(b.steps_per_sec / maxSps) * 100}%`, background: color }} />
+                        </span>
+                      )}
                     </span>
                   ) : m?.status === "running" ? (
                     <span className="bt-live">{m.phase === "tokenizing" ? "tokenizing…" : `training… ${m.step}/${m.maxSteps}`}</span>
@@ -588,9 +599,30 @@ function BenchTable({
   );
 }
 
-function ModelDetail({ info, model, expanded }: { info: ModelInfo | null; model: BenchModel | null; expanded: boolean }) {
+function ModelDetail({
+  info,
+  model,
+  graph,
+  expanded,
+}: {
+  info: ModelInfo | null;
+  model: BenchModel | null;
+  graph?: GraphRequest;
+  expanded: boolean;
+}) {
   const nodes = model?.bench?.profile.nodes ?? [];
-  const top = expanded ? nodes.slice(0, 10) : nodes.slice(0, 6);
+  // collapsed: top 8 with a "+N more" note; expanded: the full profile
+  const top = expanded ? nodes : nodes.slice(0, 8);
+  const more = nodes.length - top.length;
+  const requestFocusNode = useCanvasStore((s) => s.requestFocusNode);
+  // click-to-focus only makes sense for the open model - other models have a different canvas
+  const isOpenModel = useCanvasStore((s) => s.modelId) === model?.id;
+  // map each profiled node id to the same readable structural id the rest of the frontend uses
+  const names = useMemo(() => {
+    if (!graph) return new Map<string, string>();
+    const { nodes: n, edges: e } = graphToCanvas(graph);
+    return structuralIds(n, e);
+  }, [graph]);
   return (
     <div className="bench-block">
       {info ? (
@@ -608,9 +640,22 @@ function ModelDetail({ info, model, expanded }: { info: ModelInfo | null; model:
       {top.length > 0 ? (
         <div className="bench-nodes">
           <span className="bench-sub">Node profile (train step)</span>
-          {top.map((n) => (
-            <BenchBar key={n.node_id} label={n.logical_id} pct={n.pct} sub={`${n.pct.toFixed(0)}%`} />
-          ))}
+          {(() => {
+            const labels = top.map((n) => names.get(n.logical_id) ?? n.logical_id);
+            // start every bar past the longest label so tracks line up (clamped so a long id can't eat the track)
+            const labelCh = Math.min(18, Math.max(...labels.map((l) => l.length)) + 1);
+            return top.map((n, i) => (
+              <BenchBar
+                key={n.node_id}
+                label={labels[i]}
+                pct={n.pct}
+                sub={`${n.pct.toFixed(0)}%`}
+                labelCh={labelCh}
+                onClick={expanded || !isOpenModel ? undefined : () => requestFocusNode(n.logical_id)}
+              />
+            ));
+          })()}
+          {more > 0 && <span className="bench-more">+{more} nodes…</span>}
         </div>
       ) : (
         <div className="bench-empty">Run the benchmark to profile this model’s nodes.</div>
@@ -674,7 +719,7 @@ function InferenceBenchmark({ expanded, open, onToggle }: { expanded: boolean; o
       </h3>
       {open && (
         <div className="pan-body">
-          <ProfilePanel />
+          <ProfilePanel expanded={expanded} />
           <ComparePanel expanded={expanded} />
         </div>
       )}
@@ -682,13 +727,20 @@ function InferenceBenchmark({ expanded, open, onToggle }: { expanded: boolean; o
   );
 }
 
-function ProfilePanel() {
+function ProfilePanel({ expanded }: { expanded: boolean }) {
   const modelId = useCanvasStore((s) => s.modelId);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const requestFocusNode = useCanvasStore((s) => s.requestFocusNode);
   const compiled = useCompileStore((s) => s.status === "ready");
   const trained = useCompileStore((s) => s.trained);
   const { profiling, profile, profileError, runProfile } = useBenchStore();
 
-  const top = useMemo(() => (profile ? profile.nodes.slice(0, 8) : []), [profile]);
+  // collapsed: top 8 with a "+N more" note; expanded: the full profile
+  const top = useMemo(() => (profile ? (expanded ? profile.nodes : profile.nodes.slice(0, 8)) : []), [profile, expanded]);
+  const more = (profile?.nodes.length ?? 0) - top.length;
+  // map profiled node ids to the frontend's structural ids (same as the properties panel)
+  const names = useMemo(() => structuralIds(nodes, edges), [nodes, edges]);
   const gate = !compiled ? "Compile the model before profiling" : !trained ? "Train the model before profiling" : "";
 
   return (
@@ -702,9 +754,21 @@ function ProfilePanel() {
       {profileError && <div className="run-note bad">{profileError}</div>}
       {top.length > 0 && (
         <div className="bench-nodes">
-          {top.map((n) => (
-            <BenchBar key={n.node_id} label={n.logical_id} pct={n.pct} sub={`${n.pct.toFixed(0)}%`} />
-          ))}
+          {(() => {
+            const labels = top.map((n) => names.get(n.logical_id) ?? n.logical_id);
+            const labelCh = Math.min(18, Math.max(...labels.map((l) => l.length)) + 1);
+            return top.map((n, i) => (
+              <BenchBar
+                key={n.node_id}
+                label={labels[i]}
+                pct={n.pct}
+                sub={`${n.pct.toFixed(0)}%`}
+                labelCh={labelCh}
+                onClick={expanded ? undefined : () => requestFocusNode(n.logical_id)}
+              />
+            ));
+          })()}
+          {more > 0 && <span className="bench-more">+{more} nodes…</span>}
         </div>
       )}
       {!profile && !profileError && <div className="bench-empty">Run to time each node’s share of a decode step.</div>}
@@ -885,10 +949,35 @@ function LossGraph({ series, maxSteps, tall }: { series: { color: string; curve:
   );
 }
 
-function BenchBar({ label, pct, sub }: { label: string; pct: number; sub?: string }) {
+function BenchBar({
+  label,
+  pct,
+  sub,
+  labelCh,
+  onClick,
+}: {
+  label: string;
+  pct: number;
+  sub?: string;
+  labelCh?: number;
+  onClick?: () => void; // set = clickable: flash-highlights briefly and focuses the node on the canvas
+}) {
+  // transient highlight on click (not a persistent selection); clears itself after the flash
+  const [flash, setFlash] = useState(false);
+  const click = () => {
+    setFlash(true);
+    setTimeout(() => setFlash(false), 450);
+    onClick?.();
+  };
+  const cls = `bench-bar${onClick ? " clickable" : ""}${flash ? " flash" : ""}`;
   return (
-    <div className="bench-bar">
-      <span className="bb-label mono">{label}</span>
+    <div
+      className={cls}
+      {...(onClick ? { role: "button", tabIndex: 0, onClick: click } : {})}
+    >
+      <span className="bb-label mono" style={labelCh ? { flexBasis: `${labelCh}ch` } : undefined}>
+        {label}
+      </span>
       <span className="bb-track">
         <span className="bb-fill" style={{ width: `${Math.min(100, pct)}%` }} />
       </span>

@@ -1,5 +1,5 @@
 // Canvas: renders the graph store via React Flow; palette drop adds nodes.
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -8,6 +8,7 @@ import {
   type Edge,
   MiniMap,
   type Node,
+  type NodeChange,
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
@@ -145,8 +146,28 @@ function CanvasInner() {
     return [...displayNodes, ghost];
   }, [displayNodes, preview, meta]);
 
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, setCenter, getZoom } = useReactFlow();
   useCanvasShortcuts();
+
+  // pan (animated) to a node when the profiler requests focus; ignore a request for a missing node.
+  // keyed on the request only (read nodes lazily) so editing nodes doesn't re-trigger the pan.
+  const focusRequest = useCanvasStore((s) => s.focusRequest);
+  useEffect(() => {
+    if (!focusRequest) return;
+    const cur = useCanvasStore.getState().nodes;
+    const n = cur.find((x) => x.id === focusRequest.id);
+    if (!n) return; // not on this canvas - don't move or select
+    // make it the active selection: store selectedId (inspector) + React Flow's visual selection
+    setSelected(n.id);
+    const changes: NodeChange[] = cur
+      .filter((x) => x.selected && x.id !== n.id)
+      .map((x) => ({ id: x.id, type: "select", selected: false }));
+    changes.push({ id: n.id, type: "select", selected: true });
+    onNodesChange(changes);
+    const w = n.measured?.width ?? n.width ?? 150;
+    const h = n.measured?.height ?? n.height ?? 60;
+    setCenter(n.position.x + w / 2, n.position.y + h / 2, { zoom: Math.max(getZoom(), 1), duration: 500 });
+  }, [focusRequest, setCenter, getZoom, setSelected, onNodesChange]);
 
   // a fusion (diamond) port only connects to another fusion port; data ports only to data ports
   const isValidConnection = useCallback((c: Connection | Edge) => {
