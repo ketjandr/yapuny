@@ -1,7 +1,7 @@
 // Canvas nodes/edges <-> backend GraphRequest. Handle ids are the backend port names.
 import type { Edge, Node } from "@xyflow/react";
 import { analyzeBlock } from "./block";
-import { DEFAULT_EDGES, DEFAULT_LAYOUT, INPUT_POS, OUTPUT_POS, type SeedEdge } from "./defaultGraph";
+import { ABS_VARIANT, buildSeed, INPUT_POS, type SeedEdge, type SeedVariant } from "./defaultGraph";
 import { FUSE_PORT, fusionGroupsForRequest, isFusionEdge } from "./fusion";
 import { loadCanvas } from "./persist";
 import type { EdgeSchema, GraphMetaSchema, GraphRequest, NodeSchema } from "./types";
@@ -35,23 +35,25 @@ function seedEdgeToRf(e: SeedEdge): Edge {
   };
 }
 
-// fresh canvas: the _input / _output pseudo-nodes + the wired seed layout
-export function seedToCanvas(): { nodes: Node[]; edges: Edge[] } {
+// fresh canvas: the _input / _output pseudo-nodes + the wired seed layout for a variant
+export function seedToCanvas(variant: SeedVariant = ABS_VARIANT): { nodes: Node[]; edges: Edge[] } {
+  const seed = buildSeed(variant);
   const nodes: Node[] = [
     rfNode("_input", "_input", INPUT_POS.x, INPUT_POS.y),
-    ...DEFAULT_LAYOUT.map((n) => rfNode(n.id, n.type, n.x, n.y)),
-    rfNode("_output", "_output", OUTPUT_POS.x, OUTPUT_POS.y),
+    ...seed.nodes.map((n) => rfNode(n.id, n.type, n.x, n.y)),
+    rfNode("_output", "_output", seed.endX, INPUT_POS.y),
   ];
-  const edges: Edge[] = DEFAULT_EDGES.map(seedEdgeToRf);
+  const edges: Edge[] = seed.edges.map(seedEdgeToRf);
   return { nodes, edges };
 }
 
-// blank canvas: only the input/output endpoints, ready to wire a graph from scratch
+// blank canvas: only the input/output endpoints, spaced as wide as an unfused GPT would fill
 export function blankToCanvas(): { nodes: Node[]; edges: Edge[] } {
+  const outX = buildSeed(ABS_VARIANT).endX; // same span as the unfused GPT pipeline
   return {
     nodes: [
       rfNode("_input", "_input", INPUT_POS.x, INPUT_POS.y),
-      rfNode("_output", "_output", OUTPUT_POS.x, OUTPUT_POS.y),
+      rfNode("_output", "_output", outX, INPUT_POS.y),
     ],
     edges: [],
   };
@@ -107,12 +109,13 @@ export function graphToCanvas(graph: GraphRequest): { nodes: Node[]; edges: Edge
   const nodes: Node[] = graph.nodes.map((n, i) =>
     rfNode(n.id, n.type, (i % COLS) * 212, Math.floor(i / COLS) * 170, n.quantized ?? null),
   );
-  // _input / _output are pseudo-endpoints: not in graph.nodes, present only as edge endpoints
+  // _input / _output are pseudo-endpoints: not in graph.nodes, present only as edge endpoints.
+  // place _output one column right of the grid so it clears the laid-out nodes
   if (graph.edges.some((e) => e.from_node === "_input")) {
     nodes.unshift(rfNode("_input", "_input", INPUT_POS.x, INPUT_POS.y));
   }
   if (graph.edges.some((e) => e.to_node === "_output")) {
-    nodes.push(rfNode("_output", "_output", OUTPUT_POS.x, OUTPUT_POS.y));
+    nodes.push(rfNode("_output", "_output", Math.min(COLS, graph.nodes.length) * 212, INPUT_POS.y));
   }
   const edges: Edge[] = graph.edges.map((e) => ({
     id: `${e.from_node}.${e.from_port ?? "out"}->${e.to_node}.${e.to_port ?? "x"}`,

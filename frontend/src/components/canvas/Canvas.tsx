@@ -91,13 +91,14 @@ function CanvasInner() {
 
   // mark the edges the block error blames (multi input/output tensors) + invalid fusion beams;
   // fusion edges already carry their own type and render as the beam. A fusion group straddling
-  // the block boundary flags its beams red too (blockAnalysis.fuseBadEdgeIds).
+  // the block boundary flags its beams red too (blockAnalysis.fuseBadEdgeIds). Edges crossing the
+  // graph boundary (from _input / to _output) are dashed to read as seeds, not internal data flow.
   const displayEdges = useMemo(() => {
     const blockBad = new Set(blockAnalysis.problemEdgeIds ?? []);
     const fuseBad = new Set([...fusion.badEdges, ...(blockAnalysis.fuseBadEdgeIds ?? [])]);
-    if (blockBad.size === 0 && fuseBad.size === 0) return edges;
     return edges.map((e) => {
       const extra = [
+        e.source === "_input" || e.target === "_output" ? "edge-io" : "",
         blockBad.has(e.id) ? "edge-error" : "",
         fuseBad.has(e.id) ? "fuse-bad" : "",
       ].filter(Boolean);

@@ -30,8 +30,44 @@ class QKVProjection(nn.Module):
         return q, k, v
 
 
+class RoPE(nn.Module):
+    """Rotary position embedding: rotates Q and K by a position-dependent angle. Because the
+    attention score q_i . k_j then depends only on the offset (i - j), positions are relative, so
+    a KVCache can roll (evict old entries) and still be correct past the context window."""
+
+    def __init__(self, head_dim: int, base: float = 10000.0):
+        super().__init__()
+        # inverse frequencies for each rotation plane (half of head_dim planes)
+        inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2).float() / head_dim))
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+
+    @staticmethod
+    def _rotate_half(x: torch.Tensor) -> torch.Tensor:
+        x1, x2 = x.chunk(2, dim=-1)
+        return torch.cat((-x2, x1), dim=-1)
+
+    def forward(
+        self, q: torch.Tensor, k: torch.Tensor, positions: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # q, k: (B, n_head, T, head_dim); positions: (T,), absolute, can grow unbounded
+        freqs = torch.outer(positions.float(), self.inv_freq)  # (T, head_dim/2)
+        emb = torch.cat((freqs, freqs), dim=-1)  # (T, head_dim)
+        cos = emb.cos()[None, None]  # (1, 1, T, head_dim)
+        sin = emb.sin()[None, None]
+        q_rot = (q * cos) + (self._rotate_half(q) * sin)
+        k_rot = (k * cos) + (self._rotate_half(k) * sin)
+        return q_rot.type_as(q), k_rot.type_as(k)
+
+
 class KVCache(nn.Module):
-    """Concatenates new K, V with cached K, V from previous steps."""
+    """Appends new K, V to the cache. With rotary positions (a RoPE node upstream) the cache can
+    roll: once it exceeds block_size it keeps only the most recent block_size entries, so decoding
+    past the context window stays O(1) per token instead of recomputing the whole window. For
+    absolute position_embedding graphs the generation loop recomputes on overflow instead."""
+
+    def __init__(self, block_size: int):
+        super().__init__()
+        self.block_size = block_size
 
     def forward(
         self,
@@ -44,6 +80,10 @@ class KVCache(nn.Module):
             cached_k, cached_v = cache
             k = torch.cat([cached_k, k], dim=2)
             v = torch.cat([cached_v, v], dim=2)
+        # roll: evict the oldest entries so the window never exceeds block_size
+        if k.shape[2] > self.block_size:
+            k = k[:, :, -self.block_size:, :]
+            v = v[:, :, -self.block_size:, :]
         return k, v, (k, v)
 
 

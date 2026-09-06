@@ -61,12 +61,14 @@ class GraphModule(nn.Module):
         else:
             values[(node_id, outputs[0])] = result
 
-    def forward(self, idx: torch.Tensor, targets: torch.Tensor = None, caches=None):
+    def forward(
+        self, idx: torch.Tensor, targets: torch.Tensor = None, caches=None, pos_offset=None
+    ):
         B, T = idx.shape
         values = {}
 
-        # position indices continue from whatever is already cached
-        start_pos = cache_length(caches) or 0
+        # position indices continue from where the sequence left off (for RoPE)
+        start_pos = pos_offset if pos_offset is not None else (cache_length(caches) or 0)
 
         positions = torch.arange(start_pos, start_pos + T, device=idx.device)
 

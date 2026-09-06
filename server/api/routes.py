@@ -199,21 +199,34 @@ def save_corpus(request: CorpusSaveRequest):
 # -- Generate --
 
 
+def _require_idle():
+    # the GPU runs one job at a time; reject a new inference while anything holds it
+    if worker.busy:
+        raise HTTPException(status_code=409, detail="training or inference in progress")
+
+
 @router.post("/generate", tags=["generate"])
 def generate(request: GenerateRequest):
+    _require_idle()
     try:
         prompt_ids = worker.encode_prompt(request.id, request.prompt)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    result = worker.generate(
-        model_id=request.id,
-        prompt_ids=prompt_ids,
-        max_new_tokens=request.max_new_tokens,
-        temperature=request.temperature,
-        top_k=request.top_k,
-        bench=request.bench,
-    )
+    worker.inferring = True
+    worker.set_activity("generate", request.id)
+    try:
+        result = worker.generate(
+            model_id=request.id,
+            prompt_ids=prompt_ids,
+            max_new_tokens=request.max_new_tokens,
+            temperature=request.temperature,
+            top_k=request.top_k,
+            bench=request.bench,
+        )
+    finally:
+        worker.inferring = False
+        worker.clear_activity()
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -223,21 +236,31 @@ def generate(request: GenerateRequest):
 
 @router.post("/generate/stream", tags=["generate"])
 def generate_stream(request: GenerateRequest):
+    _require_idle()
     try:
         prompt_ids = worker.encode_prompt(request.id, request.prompt)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # mark the GPU busy before returning the response so a concurrent train/generate is rejected;
+    # the generator's finally clears it when the stream ends (or the client disconnects)
+    worker.inferring = True
+    worker.set_activity("generate", request.id)
+
     def event_stream():
-        for event in worker.generate_stream(
-            model_id=request.id,
-            prompt_ids=prompt_ids,
-            max_new_tokens=request.max_new_tokens,
-            temperature=request.temperature,
-            top_k=request.top_k,
-            bench=request.bench,
-        ):
-            yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
+        try:
+            for event in worker.generate_stream(
+                model_id=request.id,
+                prompt_ids=prompt_ids,
+                max_new_tokens=request.max_new_tokens,
+                temperature=request.temperature,
+                top_k=request.top_k,
+                bench=request.bench,
+            ):
+                yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
+        finally:
+            worker.inferring = False
+            worker.clear_activity()
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -260,6 +283,8 @@ def _start_train(request: TrainRequest):
         raise HTTPException(status_code=400, detail="model not compiled - compile first")
     if worker.training:
         raise HTTPException(status_code=409, detail="training already in progress")
+    if worker.inferring:
+        raise HTTPException(status_code=409, detail="inference in progress")
 
     # seed a fresh running state before streaming so the SSE loop neither spins on a None state nor
     # replays a previous run's terminal frame; the worker overwrites this once it starts stepping
@@ -339,6 +364,8 @@ def train_status():
 def train_bench(request: TrainBenchRequest):
     if worker.training:
         raise HTTPException(status_code=409, detail="training already in progress")
+    if worker.inferring:
+        raise HTTPException(status_code=409, detail="inference in progress")
     for mid in request.model_ids:
         if mid not in worker.cache:
             raise HTTPException(status_code=400, detail="compile all selected models first")
@@ -391,6 +418,7 @@ def stop_training():
 def bench_profile(request: ProfileRequest):
     from dataclasses import asdict
 
+    _require_idle()
     if request.mode not in ("decode", "train"):
         raise HTTPException(status_code=400, detail="mode must be 'decode' or 'train'")
 
@@ -469,4 +497,22 @@ def _bench_stream(request: BenchRunRequest):
 
 @router.post("/bench/generate", tags=["benchmark"])
 def bench_generate(request: BenchRunRequest):
-    return StreamingResponse(_bench_stream(request), media_type="text/event-stream")
+    _require_idle()
+    worker.inferring = True
+    worker.set_activity("gen_bench", request.graphs[0].id)
+
+    def stream():
+        try:
+            yield from _bench_stream(request)
+        finally:
+            worker.inferring = False
+            worker.clear_activity()
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.get("/worker/activity", tags=["worker"])
+def worker_activity():
+    # one universal busy signal: what (if anything) currently occupies the GPU, so every project
+    # can gate its Train / Generate controls (training and inference are mutually exclusive)
+    return worker.get_activity()

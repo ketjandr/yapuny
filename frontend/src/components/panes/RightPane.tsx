@@ -2,10 +2,13 @@
 //  Train -> Config + Train (aggregate loss curve, current-model stats, hyperparams, stop) + a
 //    training Benchmark section: pick up to 5 compiled models, Train runs them sequentially and
 //    fills a fwd/bwd/steps-s/peak-vram table + per-model info & node profile.
-//  Inference -> Generate + a Benchmark section (per-node profiler + head-to-head generate compare).
+//  Inference -> Generate (streaming) + a Benchmark section that mirrors training: pick up to 5
+//    trained models, generate the same prompt on each, and fill a prefill/ms-tok/tok-s/vram table +
+//    per-model info, generated output, and decode node profile.
 // The Benchmark toggle is persisted per project per mode and doubles as "benchmarking enabled";
 // it's locked while a run is in flight. Wired to the worker over SSE (trainStore / benchTrainStore /
-// benchStore). Collapsible + full-view expandable via PaneShell.
+// benchStore / inferStore). Training and inference are mutually exclusive on the GPU - a universal
+// /worker/activity signal (workerStore) gates every project's Train / Generate accordingly.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CorpusButton } from "@/components/CorpusModal";
 import { HelpDot } from "@/components/HelpDot";
@@ -14,13 +17,18 @@ import { api } from "@/lib/api";
 import { graphForProject, graphToCanvas } from "@/lib/graph";
 import { structuralIds } from "@/lib/structuralId";
 import type { GraphRequest } from "@/lib/types";
-import { useBenchStore } from "@/store/benchStore";
+import { type BenchColumn, useBenchStore } from "@/store/benchStore";
 import { type BenchModel, useBenchTrainStore } from "@/store/benchTrainStore";
-import { BATCH_MAX, BATCH_MIN, N_LAYER_MAX, N_LAYER_MIN, STEPS_MAX, STEPS_MIN, useCanvasStore } from "@/store/canvasStore";
+import {
+  BATCH_MAX, BATCH_MIN, N_LAYER_MAX, N_LAYER_MIN, STEPS_MAX, STEPS_MIN,
+  TEMP_MAX, TEMP_MIN, TOKENS_MAX, TOKENS_MIN, TOPK_MAX, TOPK_MIN, useCanvasStore,
+} from "@/store/canvasStore";
 import { useCompileStore } from "@/store/compileStore";
+import { useInferStore } from "@/store/inferStore";
 import { toast } from "@/store/toastStore";
 import { useProjectsStore } from "@/store/projectsStore";
 import { useTrainStore } from "@/store/trainStore";
+import { type Activity, blockingActivity, startActivityPolling, useWorkerStore } from "@/store/workerStore";
 import { PaneShell } from "./PaneShell";
 
 // one distinct color per benchmarked model (curve line + row/chip swatch), current model first
@@ -54,6 +62,10 @@ export function RightPane() {
   const clearSelected = useBenchTrainStore((s) => s.clearSelected);
   const [expanded, setExpanded] = useState(false);
   const title = mode === "train" ? "Training" : "Inference";
+
+  // keep the universal GPU-busy signal fresh so every project can gate Train / Generate when
+  // another project (or the other kind of run) is occupying the worker
+  useEffect(() => startActivityPolling(), []);
 
   // On project switch / reload: reattach to whatever the worker is running so a run (single or
   // bench) survives, other projects can disable their Train, and the bench's selection + curves come
@@ -333,8 +345,12 @@ function TrainSection({
   const benchRunning = bench.status === "running" || bench.status === "stopping";
   const benchOwner = bench.models[0]?.id === modelId;
   const singleMine = single.modelId === modelId;
-  const otherBusy = (singleRunning && !singleMine) || (benchRunning && !benchOwner);
   const running = benchOn ? benchRunning && benchOwner : singleRunning && singleMine;
+  // the worker runs one job at a time: anything not our own training run blocks Train (another
+  // project's training, or ANY inference - they all occupy the GPU)
+  const activity = useWorkerStore((s) => s.activity);
+  const blocked = blockingActivity(activity, modelId, ["train", "train_bench"]);
+  const otherBusy = !!blocked;
 
   // results are isolated per project: only show the bench run on the project that owns it, and the
   // single run on the project it belongs to. Everything else shows an empty (idle) view.
@@ -376,8 +392,8 @@ function TrainSection({
     else single.start({ id: modelId, ...hp(), bench: false });
   };
 
-  const gate = otherBusy
-    ? `Training "${titleOf(otherBusyId(single, bench))}" is in progress`
+  const gate = blocked
+    ? busyLabel(blocked, titleOf(blocked.modelId))
     : benchOn && !allCompiled
       ? "Compile all selected models first"
       : !compiledCurrent
@@ -448,9 +464,10 @@ function TrainSection({
   );
 }
 
-// the model id of whatever run is currently occupying the worker (for the "in progress" tooltip)
-function otherBusyId(single: { modelId: string | null }, bench: { models: BenchModel[]; current: number }): string {
-  return bench.models[bench.current]?.id ?? single.modelId ?? "";
+// tooltip for a control blocked because the GPU is busy elsewhere (another project or the other run)
+function busyLabel(a: Activity, title: string): string {
+  const what = a.kind === "generate" || a.kind === "gen_bench" ? "Generating" : "Training";
+  return `${what} "${title}" is in progress`;
 }
 
 function RunNote({ status, error, saved, bench }: { status: string; error: string | null; saved: boolean; bench: boolean }) {
@@ -704,29 +721,154 @@ function fmtParams(n: number): string {
   return String(n);
 }
 
-// --- inference: generate + benchmark (per-node profiler + generate compare) ---
+// --- inference: streaming generate + a multi-model benchmark (mirrors the training benchmark) ---
+
+// sampling controls shared by Generate + the inference benchmark (persisted per project in `gen`)
+function GenParams({ disabled }: { disabled: boolean }) {
+  const gen = useCanvasStore((s) => s.gen);
+  const setGenHp = useCanvasStore((s) => s.setGenHp);
+  return (
+    <div className="hp-row">
+      <HpNumField label="temp" value={gen.temperature} min={TEMP_MIN} max={TEMP_MAX} float onCommit={(v) => setGenHp({ temperature: v })} disabled={disabled} />
+      <HpNumField label="top_k" value={gen.topK} min={TOPK_MIN} max={TOPK_MAX} onCommit={(v) => setGenHp({ topK: v })} disabled={disabled} />
+      <HpNumField label="tokens" value={gen.maxTokens} min={TOKENS_MIN} max={TOKENS_MAX} onCommit={(v) => setGenHp({ maxTokens: v })} disabled={disabled} />
+    </div>
+  );
+}
 
 function GenerateSection({ expanded }: { expanded: boolean }) {
+  const modelId = useCanvasStore((s) => s.modelId);
+  const projects = useProjectsStore((s) => s.projects);
+  const gen = useCanvasStore((s) => s.gen);
+  const setGenHp = useCanvasStore((s) => s.setGenHp);
+  const compiled = useCompileStore((s) => s.status === "ready");
+  const trained = useCompileStore((s) => s.trained);
+  const infer = useInferStore();
+  const activity = useWorkerStore((s) => s.activity);
+  const blocked = blockingActivity(activity, modelId, ["generate"]);
+  const titleOf = (id: string) => projects.find((p) => p.id === id)?.title ?? id;
+
+  const mine = infer.modelId === modelId;
+  const running = infer.status === "running" && mine;
+  const canGen = !blocked && compiled && trained;
+  const gate = blocked
+    ? busyLabel(blocked, titleOf(blocked.modelId))
+    : !compiled
+      ? "Compile the model before generating"
+      : !trained
+        ? "Train the model before generating"
+        : "";
+  const tip = useTooltip(gate);
+
+  const onGenerate = () => {
+    if (running) {
+      infer.stop();
+      return;
+    }
+    infer.start({ id: modelId, prompt: gen.prompt, max_new_tokens: gen.maxTokens, temperature: gen.temperature, top_k: gen.topK });
+  };
+
+  const output = mine ? infer.text : "";
+  const tps = mine && infer.tokensPerSec != null && (running || infer.status === "done") ? infer.tokensPerSec : null;
+
   return (
     <section className="grp">
-      <h3>Generate</h3>
+      <h3>
+        Generate
+        {tps != null && <span className="grp-sub mono">{tps.toFixed(1)} tok/s</span>}
+      </h3>
       <div className="pan-body">
-        <textarea className="gen-prompt" placeholder="Enter a prompt…" rows={expanded ? 4 : 3} />
-        <div className="hp-row">
-          <HP label="temp" def="0.8" />
-          <HP label="top_k" def="200" />
-          <HP label="tokens" def="256" />
-        </div>
-        <button type="button" className="btn primary">
-          Generate
-        </button>
-        <div className="gen-output mono">Output will stream here…</div>
+        <textarea
+          className="gen-prompt"
+          placeholder="Enter a prompt…"
+          rows={expanded ? 4 : 3}
+          value={gen.prompt}
+          disabled={running}
+          onChange={(e) => setGenHp({ prompt: e.target.value })}
+        />
+        <GenParams disabled={running} />
+        <span className="btn-wrap" {...tip}>
+          <button type="button" className={`btn ${running ? "danger" : "primary"}`} disabled={!running && !canGen} onClick={onGenerate}>
+            {running ? "Stop" : "Generate"}
+          </button>
+        </span>
+        {mine && infer.status === "error" ? (
+          <div className="run-note bad">{infer.error}</div>
+        ) : (
+          <div className="gen-output mono">{output || (running ? "…" : "Output will stream here…")}</div>
+        )}
       </div>
     </section>
   );
 }
 
+// inference benchmark: pick up to 5 trained models, generate the same prompt on each, and compare
+// throughput/latency/vram in a table. Selecting a row inspects that model's config, output & profile.
 function InferenceBenchmark({ expanded, open, onToggle }: { expanded: boolean; open: boolean; onToggle: (v: boolean) => void }) {
+  const modelId = useCanvasStore((s) => s.modelId);
+  const toGraph = useCanvasStore((s) => s.toGraph);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const meta = useCanvasStore((s) => s.meta);
+  const gen = useCanvasStore((s) => s.gen);
+  const setGenHp = useCanvasStore((s) => s.setGenHp);
+  const projects = useProjectsStore((s) => s.projects);
+  const compiled = useCompileStore((s) => s.status === "ready");
+  const trained = useCompileStore((s) => s.trained);
+  const bench = useBenchStore();
+  const activity = useWorkerStore((s) => s.activity);
+  const blocked = blockingActivity(activity, modelId, ["gen_bench"]);
+  const titleOf = (id: string) => projects.find((p) => p.id === id)?.title ?? id;
+
+  const [picked, setPicked] = useState<string[]>([]);
+  const others = projects.filter((p) => p.id !== modelId);
+
+  // results isolate to the project that started the run (column 0), like the training benchmark
+  const owned = bench.compareOwner === modelId;
+  const columns = owned ? bench.columns : [];
+  const running = bench.comparing && owned;
+  const toggle = (id: string) => setPicked((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= 4 ? s : [...s, id]));
+
+  const entries = useMemo<CompareEntry[]>(() => {
+    const cur: CompareEntry = { id: modelId, graph: toGraph(), title: titleOf(modelId) };
+    const rest = picked
+      .map((id) => {
+        const g = graphForProject(id);
+        return g ? { id, graph: g, title: titleOf(id) } : null;
+      })
+      .filter((e): e is CompareEntry => e !== null);
+    return [cur, ...rest];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId, picked, projects, nodes, edges, meta]);
+
+  const infos = useCompareInfos(entries, running ? "run" : "idle");
+
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const detail = detailId ?? entries[0]?.id;
+
+  // gating: every selected model must be compiled + trained, and the worker free
+  const ready = (id: string) => (id === modelId ? compiled && trained : Boolean(infos[id]?.ready && infos[id]?.trained));
+  const allReady = entries.every((e) => ready(e.id));
+  const canRun = !blocked && allReady;
+  const gate = blocked
+    ? busyLabel(blocked, titleOf(blocked.modelId))
+    : !allReady
+      ? "Compile and train every selected model first"
+      : "";
+  const tip = useTooltip(gate);
+
+  const onRun = () => {
+    if (running) {
+      bench.stopCompare();
+      return;
+    }
+    setDetailId(entries[0]?.id ?? null);
+    bench.runCompare(
+      entries.map((e) => ({ id: e.id, graph: e.graph, label: e.title })),
+      { prompt: gen.prompt, max_new_tokens: gen.maxTokens, temperature: gen.temperature, top_k: gen.topK },
+    );
+  };
+
   return (
     <section className="grp">
       <h3 style={open ? undefined : { marginBottom: 0 }}>
@@ -736,7 +878,8 @@ function InferenceBenchmark({ expanded, open, onToggle }: { expanded: boolean; o
           role="switch"
           className={`sw${open ? " on" : ""}`}
           aria-checked={open}
-          aria-label={open ? "Hide benchmark" : "Show benchmark"}
+          aria-label={open ? "Disable benchmark" : "Enable benchmark"}
+          disabled={running}
           onClick={() => onToggle(!open)}
         >
           <span className="sw-knob" />
@@ -744,41 +887,178 @@ function InferenceBenchmark({ expanded, open, onToggle }: { expanded: boolean; o
       </h3>
       {open && (
         <div className="pan-body">
-          <ProfilePanel expanded={expanded} />
-          <ComparePanel expanded={expanded} />
+          {/* model picker: the open model is always column 0; add up to 4 others (5 total) */}
+          <div className="cmp-picker">
+            {entries.map((e, i) => (
+              <span key={e.id} className="chip on" style={{ borderColor: BENCH_COLORS[i % BENCH_COLORS.length] }}>
+                <span className="chip-dot" style={{ background: BENCH_COLORS[i % BENCH_COLORS.length] }} />
+                {i === 0 ? `${e.title} (this)` : e.title}
+              </span>
+            ))}
+            {!running &&
+              others
+                .filter((p) => !picked.includes(p.id))
+                .map((p) => (
+                  <button key={p.id} type="button" className="chip" disabled={picked.length >= 4} onClick={() => toggle(p.id)}>
+                    + {p.title}
+                  </button>
+                ))}
+          </div>
+
+          <textarea
+            className="gen-prompt"
+            placeholder="Prompt for every model…"
+            rows={expanded ? 3 : 2}
+            value={gen.prompt}
+            disabled={running}
+            onChange={(e) => setGenHp({ prompt: e.target.value })}
+          />
+          <GenParams disabled={running} />
+
+          <span className="btn-wrap" {...tip}>
+            <button type="button" className={`btn ${running ? "danger" : "primary"}`} disabled={!running && !canRun} onClick={onRun}>
+              {running ? "Stop" : "Run benchmark"}
+            </button>
+          </span>
+
+          <InferBenchTable entries={entries} columns={columns} detail={detail} onSelect={setDetailId} expanded={expanded} />
+
+          <div className="bench-detail">
+            <InferDetail
+              info={infos[detail]?.info ?? null}
+              column={columns.find((c) => c.id === detail) ?? null}
+              graph={entries.find((e) => e.id === detail)?.graph}
+              expanded={expanded}
+            />
+          </div>
         </div>
       )}
     </section>
   );
 }
 
-function ProfilePanel({ expanded }: { expanded: boolean }) {
-  const modelId = useCanvasStore((s) => s.modelId);
-  const nodes = useCanvasStore((s) => s.nodes);
-  const edges = useCanvasStore((s) => s.edges);
-  const requestFocusNode = useCanvasStore((s) => s.requestFocusNode);
-  const compiled = useCompileStore((s) => s.status === "ready");
-  const trained = useCompileStore((s) => s.trained);
-  const { profiling, profile, profileError, runProfile } = useBenchStore();
+const fmtVram = (mb: number | null | undefined) =>
+  mb == null ? "—" : mb < 1024 ? `${mb.toFixed(0)} MB` : `${(mb / 1024).toFixed(2)} GB`;
 
-  // collapsed: top 8 with a "+N more" note; expanded: the full profile
-  const top = useMemo(() => (profile ? (expanded ? profile.nodes : profile.nodes.slice(0, 8)) : []), [profile, expanded]);
-  const more = (profile?.nodes.length ?? 0) - top.length;
-  // map profiled node ids to the frontend's structural ids (same as the properties panel)
-  const names = useMemo(() => structuralIds(nodes, edges), [nodes, edges]);
-  const gate = !compiled ? "Compile the model before profiling" : !trained ? "Train the model before profiling" : "";
+// one row per model: prefill ms, ms/tok, tok/s (with a throughput bar), peak vram. Rows are the
+// selector for the detail panel below - click one to inspect that model's output + node profile.
+function InferBenchTable({
+  entries,
+  columns,
+  detail,
+  onSelect,
+  expanded,
+}: {
+  entries: CompareEntry[];
+  columns: BenchColumn[];
+  detail?: string;
+  onSelect: (id: string) => void;
+  expanded: boolean;
+}) {
+  const byId = new Map(columns.map((c) => [c.id, c]));
+  const maxTps = Math.max(1, ...columns.map((c) => c.tokensPerSec ?? 0));
+  const cell = (v: number | null | undefined, d: number) => (v != null ? v.toFixed(d) : "—");
+
+  return (
+    <div className="bt-wrap">
+      <table className="bt-table mono">
+        <thead>
+          <tr>
+            <th className="bt-name">model</th>
+            <th>prefill</th>
+            <th>ms/tok</th>
+            <th className="bt-tp">tok / s</th>
+            <th>peak vram</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((e, i) => {
+            const c = byId.get(e.id);
+            const color = BENCH_COLORS[i % BENCH_COLORS.length];
+            const pending = !c || (!c.done && !c.running);
+            return (
+              <tr key={e.id} className={`bt-row${detail === e.id ? " sel" : ""}`} onClick={() => onSelect(e.id)}>
+                <td className="bt-name">
+                  <span className="bt-bar" style={{ background: color }} />
+                  {e.title}
+                </td>
+                <td>{c?.error ? "err" : cell(c?.prefillMs, 0)}</td>
+                <td>{c?.error ? "err" : cell(c?.msPerToken, 1)}</td>
+                <td className="bt-tp">
+                  {c?.tokensPerSec != null ? (
+                    <span className="bt-tp-wrap">
+                      <span className="bt-tp-num">{c.tokensPerSec.toFixed(1)}</span>
+                      {expanded && (
+                        <span className="bb-track">
+                          <span className="bb-fill" style={{ width: `${(c.tokensPerSec / maxTps) * 100}%`, background: color }} />
+                        </span>
+                      )}
+                    </span>
+                  ) : c?.running ? (
+                    <span className="bt-live">generating…</span>
+                  ) : (
+                    <span className="bench-empty">{pending ? "pending" : "—"}</span>
+                  )}
+                </td>
+                <td>{fmtVram(c?.peakVramMb)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// detail for the selected model: config, its generated output (varies per model), and decode profile
+function InferDetail({
+  info,
+  column,
+  graph,
+  expanded,
+}: {
+  info: ModelInfo | null;
+  column: BenchColumn | null;
+  graph?: GraphRequest;
+  expanded: boolean;
+}) {
+  const modelId = useCanvasStore((s) => s.modelId);
+  const requestFocusNode = useCanvasStore((s) => s.requestFocusNode);
+  const isOpenModel = column?.id === modelId;
+  const profNodes = column?.profile ?? [];
+  const top = expanded ? profNodes : profNodes.slice(0, 8);
+  const more = profNodes.length - top.length;
+  const names = useMemo(() => {
+    if (!graph) return new Map<string, string>();
+    const { nodes: n, edges: e } = graphToCanvas(graph);
+    return structuralIds(n, e);
+  }, [graph]);
+
+  const outText = column?.error ? column.error : column?.text || (column?.running ? "…" : "");
 
   return (
     <div className="bench-block">
-      <div className="bench-head">
-        <span className="bench-sub">Per-node profile</span>
-        <button type="button" className="btn tiny" disabled={profiling || !compiled || !trained} title={gate || undefined} onClick={() => runProfile({ id: modelId, mode: "decode" })}>
-          {profiling ? "profiling…" : "Profile"}
-        </button>
+      {info ? (
+        <div className="info-grid">
+          <Info k="params" v={fmtParams(info.param_count)} />
+          <Info k="n_layer" v={String(info.n_layer ?? "—")} />
+          <Info k="n_head" v={String(info.n_head ?? "—")} />
+          <Info k="n_embd" v={String(info.n_embd ?? "—")} />
+          <Info k="block" v={String(info.block_size)} />
+          <Info k="vocab" v={String(info.vocab_size)} />
+        </div>
+      ) : (
+        <div className="bench-empty">Compile this model to see its config.</div>
+      )}
+
+      <div className="bench-nodes">
+        <span className="bench-sub">Output</span>
+        <div className={`gen-output mono${column?.error ? " bad" : ""}`}>{outText || "Run the benchmark to generate."}</div>
       </div>
-      {profileError && <div className="run-note bad">{profileError}</div>}
+
       {top.length > 0 && (
         <div className="bench-nodes">
+          <span className="bench-sub">Node profile (decode step)</span>
           {(() => {
             const labels = top.map((n) => names.get(n.logical_id) ?? n.logical_id);
             const labelCh = Math.min(18, Math.max(...labels.map((l) => l.length)) + 1);
@@ -789,129 +1069,15 @@ function ProfilePanel({ expanded }: { expanded: boolean }) {
                 pct={n.pct}
                 sub={`${n.pct.toFixed(1)}%`}
                 labelCh={labelCh}
-                onClick={expanded ? undefined : () => requestFocusNode(n.logical_id)}
+                onClick={expanded || !isOpenModel ? undefined : () => requestFocusNode(n.logical_id)}
               />
             ));
           })()}
           {more > 0 && <span className="bench-more">+{more} nodes…</span>}
         </div>
       )}
-      {!profile && !profileError && <div className="bench-empty">Run to time each node’s share of a decode step.</div>}
     </div>
   );
-}
-
-function ComparePanel({ expanded }: { expanded: boolean }) {
-  const modelId = useCanvasStore((s) => s.modelId);
-  const toGraph = useCanvasStore((s) => s.toGraph);
-  const projects = useProjectsStore((s) => s.projects);
-  const { comparing, columns, runCompare } = useBenchStore();
-
-  const current = projects.find((p) => p.id === modelId);
-  const others = projects.filter((p) => p.id !== modelId);
-  const [picked, setPicked] = useState<string[]>([]);
-  const [prompt, setPrompt] = useState("The ");
-
-  const toggle = (id: string) => setPicked((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= 4 ? s : [...s, id]));
-
-  const onRun = () => {
-    const entries = [
-      { id: modelId, graph: toGraph(), label: current?.title ?? "current" },
-      ...picked
-        .map((id) => {
-          const g = graphForProject(id);
-          return g ? { id, graph: g, label: projects.find((p) => p.id === id)?.title ?? id } : null;
-        })
-        .filter((e): e is { id: string; graph: ReturnType<typeof toGraph>; label: string } => e !== null),
-    ];
-    runCompare(entries, { prompt, max_new_tokens: 64, temperature: 0.8, top_k: 200 });
-  };
-
-  return (
-    <div className="bench-block">
-      <div className="bench-head">
-        <span className="bench-sub">Compare models</span>
-        <button type="button" className="btn tiny" disabled={comparing} onClick={onRun}>
-          {comparing ? "running…" : "Run"}
-        </button>
-      </div>
-      <input className="hp-in mono cmp-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="prompt" aria-label="compare prompt" />
-      {others.length > 0 ? (
-        <div className="cmp-picker">
-          {others.map((p) => {
-            const on = picked.includes(p.id);
-            return (
-              <button key={p.id} type="button" className={`chip${on ? " on" : ""}`} aria-pressed={on} disabled={!on && picked.length >= 4} onClick={() => toggle(p.id)}>
-                {p.title}
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="bench-empty">Save more models to compare against.</div>
-      )}
-      {columns.length > 0 && <CompareTable expanded={expanded} />}
-    </div>
-  );
-}
-
-function CompareTable({ expanded }: { expanded: boolean }) {
-  const columns = useBenchStore((s) => s.columns);
-  const fmt = (v: number | null, d: number) => (v != null ? v.toFixed(d) : "—");
-  return (
-    <div className="cmp-scroll">
-      <table className="cmp-table mono">
-        <thead>
-          <tr>
-            <th />
-            {columns.map((c) => (
-              <th key={c.id}>{c.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          <CmpRow label="tok/s" cells={columns.map((c) => (c.error ? "err" : fmt(c.tokensPerSec, 0)))} best={bestIdx(columns, (c) => c.tokensPerSec, "max")} />
-          <CmpRow label="ms/tok" cells={columns.map((c) => (c.error ? "err" : fmt(c.msPerToken, 1)))} best={bestIdx(columns, (c) => c.msPerToken, "min")} />
-          <CmpRow label="prefill ms" cells={columns.map((c) => (c.error ? "err" : fmt(c.prefillMs, 0)))} best={bestIdx(columns, (c) => c.prefillMs, "min")} />
-        </tbody>
-      </table>
-      {expanded &&
-        columns.map((c) => (
-          <div key={c.id} className="cmp-sample">
-            <span className="cmp-sample-k">{c.label}</span>
-            <span className="cmp-sample-v mono">{c.error ? c.error : c.text || (c.done ? "" : "…")}</span>
-          </div>
-        ))}
-    </div>
-  );
-}
-
-function CmpRow({ label, cells, best }: { label: string; cells: string[]; best: number }) {
-  return (
-    <tr>
-      <td className="cmp-k">{label}</td>
-      {cells.map((v, i) => (
-        // index key is stable here: columns keep their order for the whole run
-        <td key={i} className={i === best ? "cmp-best" : undefined}>
-          {v}
-        </td>
-      ))}
-    </tr>
-  );
-}
-
-function bestIdx(cols: { error: string | null }[], pick: (c: any) => number | null, dir: "max" | "min"): number {
-  let best = -1;
-  let val = dir === "max" ? -Infinity : Infinity;
-  cols.forEach((c, i) => {
-    const v = (pick as (c: unknown) => number | null)(c);
-    if (c.error || v == null) return;
-    if (dir === "max" ? v > val : v < val) {
-      val = v;
-      best = i;
-    }
-  });
-  return best;
 }
 
 // --- bits ---
@@ -925,21 +1091,14 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function HP({ label, def }: { label: string; def: string }) {
-  return (
-    <label className="hp">
-      <span className="hp-k">{label}</span>
-      <input className="hp-in mono" defaultValue={def} />
-    </label>
-  );
-}
-
-// labeled integer field for the hp-row: free typing, clamp to [min, max] on blur/Enter
+// labeled number field for the hp-row: free typing, clamp to [min, max] on blur/Enter. Integers by
+// default; `float` keeps up to 2 decimals (e.g. temperature).
 function HpNumField({
   label,
   value,
   min,
   max,
+  float,
   onCommit,
   disabled,
 }: {
@@ -947,6 +1106,7 @@ function HpNumField({
   value: number;
   min: number;
   max: number;
+  float?: boolean;
   onCommit: (v: number) => void;
   disabled?: boolean;
 }) {
@@ -958,7 +1118,8 @@ function HpNumField({
       setText(String(value));
       return;
     }
-    const clamped = Math.min(max, Math.max(min, Math.round(n)));
+    let clamped = Math.min(max, Math.max(min, float ? n : Math.round(n)));
+    if (float) clamped = Math.round(clamped * 100) / 100;
     onCommit(clamped);
     setText(String(clamped));
   };
@@ -968,7 +1129,7 @@ function HpNumField({
       <input
         className="hp-in mono"
         type="text"
-        inputMode="numeric"
+        inputMode={float ? "decimal" : "numeric"}
         value={text}
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}

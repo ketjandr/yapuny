@@ -45,7 +45,7 @@ class TestBasicValidation:
         graph = GraphSpec.from_dict(valid_graph_dict)
         result = validator.validate(graph)
         assert not result.valid
-        assert any("unknown node type" in e for e in result.errors)
+        assert any("unsupported node type" in e for e in result.errors)
 
     def test_missing_required_node(self, validator, valid_graph_dict):
         valid_graph_dict["nodes"] = [n for n in valid_graph_dict["nodes"] if n["type"] != "lm_head"]

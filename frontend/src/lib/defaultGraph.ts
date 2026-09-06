@@ -1,4 +1,6 @@
-// Seed graph: one pre-LN transformer block (embeddings -> attention -> MLP -> LM head).
+// Seed graph: one pre-LN transformer block, built in variants - absolute (position_embedding) vs
+// rotary (RoPE) positions, with/without a kv cache, and unfused (score/mask/softmax/vsum) vs flash
+// attention. templateCanvas (lib/projects.ts) picks a variant per starter template.
 import { nodeWidth, resolveNodeDef } from "./nodeCatalog";
 import type { GraphMetaSchema } from "./types";
 
@@ -25,6 +27,15 @@ export const DEFAULT_META: GraphMetaSchema = {
   vocab_size: 8000,
 };
 
+// what a seed's attention path looks like
+export interface SeedVariant {
+  rope: boolean; // rotary positions (replaces position_embedding)
+  cache: boolean; // kv cache branch below the attention
+  flash: boolean; // fused flash attention (replaces score/mask/softmax/value-sum)
+}
+export const ABS_VARIANT: SeedVariant = { rope: false, cache: false, flash: false };
+export const OPT_VARIANT: SeedVariant = { rope: true, cache: true, flash: true };
+
 const COL_GAP = 50; // uniform horizontal gap between stages (x is width-driven, not fixed)
 const ROW = 130; // main pipeline row (node top y)
 
@@ -32,86 +43,129 @@ function typeWidth(type: string): number {
   return nodeWidth(resolveNodeDef(type)!, DEFAULT_META);
 }
 
-// The main pipeline as ordered stages (columns); x is computed from cumulative widths so
-// gaps stay even regardless of each node's content width. tok/pos embed share a column.
-const STAGES: { id: string; type: string; y: number }[][] = [
-  [
-    { id: "tok_emb", type: "token_embedding", y: ROW - 55 },
-    { id: "pos_emb", type: "position_embedding", y: ROW + 85 },
-  ],
-  [{ id: "emb_add", type: "residual_add", y: ROW }],
-  [{ id: "emb_drop", type: "dropout", y: ROW }],
-  [{ id: "ln1", type: "layernorm", y: ROW }],
-  [{ id: "qkv", type: "qkv_proj", y: ROW }],
-  [{ id: "attn", type: "attention_score", y: ROW }],
-  [{ id: "mask", type: "causal_mask", y: ROW }],
-  [{ id: "smax", type: "softmax", y: ROW }],
-  [{ id: "vsum", type: "value_weighted_sum", y: ROW }],
-  [{ id: "oproj", type: "out_proj", y: ROW }],
-  [{ id: "attn_drop", type: "dropout", y: ROW }],
-  [{ id: "res1", type: "residual_add", y: ROW }],
-  [{ id: "ln2", type: "layernorm", y: ROW }],
-  [{ id: "mlp_up", type: "mlp_up", y: ROW }],
-  [{ id: "gelu", type: "mlp_activation", y: ROW }],
-  [{ id: "mlp_down", type: "mlp_down", y: ROW }],
-  [{ id: "mlp_drop", type: "dropout", y: ROW }],
-  [{ id: "res2", type: "residual_add", y: ROW }],
-  [{ id: "lnf", type: "layernorm", y: ROW }],
-  [{ id: "lm_head", type: "lm_head", y: ROW }],
-];
+// _input sits just left of the pipeline; seed graphs compute their own _output x (buildSeed.endX),
+// blank/reconstructed graphs place _output relative to their own content
+export const INPUT_POS = { x: -(typeWidth("_input") + COL_GAP), y: ROW };
 
-function buildLayout(): { nodes: PlacedNode[]; endX: number } {
-  const nodes: PlacedNode[] = [];
-  const kvW = typeWidth("kv_cache");
-  let x = 0;
-  for (const stage of STAGES) {
-    for (const n of stage) nodes.push({ id: n.id, type: n.type, x, y: n.y });
-    let advance = Math.max(...stage.map((n) => typeWidth(n.type))) + COL_GAP;
-    if (stage.some((n) => n.id === "qkv")) advance += kvW + COL_GAP; // room for kv below
-    x += advance;
+// the main pipeline as ordered stages (columns) for a variant; embeddings may stack tok/pos
+function stagesFor(v: SeedVariant): { id: string; type: string; y: number }[][] {
+  const stages: { id: string; type: string; y: number }[][] = [];
+  if (v.rope) stages.push([{ id: "tok_emb", type: "token_embedding", y: ROW }]);
+  else {
+    stages.push([
+      { id: "tok_emb", type: "token_embedding", y: ROW - 55 },
+      { id: "pos_emb", type: "position_embedding", y: ROW + 85 },
+    ]);
+    stages.push([{ id: "emb_add", type: "residual_add", y: ROW }]);
   }
-  // kv cache: a branch below the main row, centered in the widened qkv->attn gap
-  const qkv = nodes.find((n) => n.id === "qkv")!;
-  nodes.push({ id: "kv", type: "kv_cache", x: qkv.x + typeWidth("qkv_proj") + COL_GAP, y: ROW + 115 });
-  return { nodes, endX: x };
+  stages.push([{ id: "emb_drop", type: "dropout", y: ROW }]);
+  stages.push([{ id: "ln1", type: "layernorm", y: ROW }]);
+  stages.push([{ id: "qkv", type: "qkv_proj", y: ROW }]);
+  if (v.rope) stages.push([{ id: "rope", type: "rope", y: ROW }]);
+  if (v.flash) stages.push([{ id: "flash", type: "flash_attention", y: ROW }]);
+  else {
+    stages.push([{ id: "attn", type: "attention_score", y: ROW }]);
+    stages.push([{ id: "mask", type: "causal_mask", y: ROW }]);
+    stages.push([{ id: "smax", type: "softmax", y: ROW }]);
+    stages.push([{ id: "vsum", type: "value_weighted_sum", y: ROW }]);
+  }
+  stages.push([{ id: "oproj", type: "out_proj", y: ROW }]);
+  stages.push([{ id: "attn_drop", type: "dropout", y: ROW }]);
+  stages.push([{ id: "res1", type: "residual_add", y: ROW }]);
+  stages.push([{ id: "ln2", type: "layernorm", y: ROW }]);
+  stages.push([{ id: "mlp_up", type: "mlp_up", y: ROW }]);
+  stages.push([{ id: "gelu", type: "mlp_activation", y: ROW }]);
+  stages.push([{ id: "mlp_down", type: "mlp_down", y: ROW }]);
+  stages.push([{ id: "mlp_drop", type: "dropout", y: ROW }]);
+  stages.push([{ id: "res2", type: "residual_add", y: ROW }]);
+  stages.push([{ id: "lnf", type: "layernorm", y: ROW }]);
+  stages.push([{ id: "lm_head", type: "lm_head", y: ROW }]);
+  return stages;
 }
 
-const layout = buildLayout();
-export const DEFAULT_LAYOUT = layout.nodes;
+function seedEdges(v: SeedVariant): SeedEdge[] {
+  const e: SeedEdge[] = [];
+  const add = (from: string, fromPort: string, to: string, toPort: string) =>
+    e.push({ from, fromPort, to, toPort });
 
-// pseudo-node positions: just past each end of the pipeline
-export const INPUT_POS = { x: -(typeWidth("_input") + COL_GAP), y: ROW };
-export const OUTPUT_POS = { x: layout.endX, y: ROW };
+  add("_input", "idx", "tok_emb", "idx");
+  if (v.rope) add("tok_emb", "out", "emb_drop", "x");
+  else {
+    add("_input", "positions", "pos_emb", "positions");
+    add("tok_emb", "out", "emb_add", "x");
+    add("pos_emb", "out", "emb_add", "residual");
+    add("emb_add", "out", "emb_drop", "x");
+  }
+  add("emb_drop", "out", "ln1", "x");
+  add("ln1", "out", "qkv", "x");
 
-export const DEFAULT_EDGES: SeedEdge[] = [
-  { from: "_input", fromPort: "idx", to: "tok_emb", toPort: "idx" },
-  { from: "_input", fromPort: "positions", to: "pos_emb", toPort: "positions" },
-  { from: "tok_emb", fromPort: "out", to: "emb_add", toPort: "x" },
-  { from: "pos_emb", fromPort: "out", to: "emb_add", toPort: "residual" },
-  { from: "emb_add", fromPort: "out", to: "emb_drop", toPort: "x" },
-  { from: "emb_drop", fromPort: "out", to: "ln1", toPort: "x" },
-  { from: "ln1", fromPort: "out", to: "qkv", toPort: "x" },
-  // Q bypasses the cache; K/V flow through it
-  { from: "qkv", fromPort: "q", to: "attn", toPort: "q" },
-  { from: "qkv", fromPort: "k", to: "kv", toPort: "k" },
-  { from: "qkv", fromPort: "v", to: "kv", toPort: "v" },
-  { from: "kv", fromPort: "k", to: "attn", toPort: "k" },
-  { from: "kv", fromPort: "v", to: "vsum", toPort: "v" },
-  { from: "attn", fromPort: "out", to: "mask", toPort: "x" },
-  { from: "mask", fromPort: "out", to: "smax", toPort: "x" },
-  { from: "smax", fromPort: "out", to: "vsum", toPort: "att" },
-  { from: "vsum", fromPort: "out", to: "oproj", toPort: "x" },
-  { from: "oproj", fromPort: "out", to: "attn_drop", toPort: "x" },
-  { from: "attn_drop", fromPort: "out", to: "res1", toPort: "x" },
-  { from: "emb_drop", fromPort: "out", to: "res1", toPort: "residual" }, // attn skip
-  { from: "res1", fromPort: "out", to: "ln2", toPort: "x" },
-  { from: "ln2", fromPort: "out", to: "mlp_up", toPort: "x" },
-  { from: "mlp_up", fromPort: "out", to: "gelu", toPort: "x" },
-  { from: "gelu", fromPort: "out", to: "mlp_down", toPort: "x" },
-  { from: "mlp_down", fromPort: "out", to: "mlp_drop", toPort: "x" },
-  { from: "mlp_drop", fromPort: "out", to: "res2", toPort: "x" },
-  { from: "res1", fromPort: "out", to: "res2", toPort: "residual" }, // mlp skip
-  { from: "res2", fromPort: "out", to: "lnf", toPort: "x" },
-  { from: "lnf", fromPort: "out", to: "lm_head", toPort: "x" },
-  { from: "lm_head", fromPort: "out", to: "_output", toPort: "logits" },
-];
+  // q/k optionally rotated by rope before attention
+  let q: [string, string] = ["qkv", "q"];
+  let k: [string, string] = ["qkv", "k"];
+  if (v.rope) {
+    add("qkv", "q", "rope", "q");
+    add("qkv", "k", "rope", "k");
+    add("_input", "positions", "rope", "positions");
+    q = ["rope", "q"];
+    k = ["rope", "k"];
+  }
+  // k/v into attention, optionally routed through the cache
+  let kv: [string, string] = k;
+  let vv: [string, string] = ["qkv", "v"];
+  if (v.cache) {
+    add(k[0], k[1], "kv", "k");
+    add("qkv", "v", "kv", "v");
+    kv = ["kv", "k"];
+    vv = ["kv", "v"];
+  }
+  if (v.flash) {
+    add(q[0], q[1], "flash", "q");
+    add(kv[0], kv[1], "flash", "k");
+    add(vv[0], vv[1], "flash", "v");
+    add("flash", "out", "oproj", "x");
+  } else {
+    add(q[0], q[1], "attn", "q");
+    add(kv[0], kv[1], "attn", "k");
+    add("attn", "out", "mask", "x");
+    add("mask", "out", "smax", "x");
+    add("smax", "out", "vsum", "att");
+    add(vv[0], vv[1], "vsum", "v");
+    add("vsum", "out", "oproj", "x");
+  }
+
+  add("oproj", "out", "attn_drop", "x");
+  add("attn_drop", "out", "res1", "x");
+  add("emb_drop", "out", "res1", "residual"); // attn skip
+  add("res1", "out", "ln2", "x");
+  add("ln2", "out", "mlp_up", "x");
+  add("mlp_up", "out", "gelu", "x");
+  add("gelu", "out", "mlp_down", "x");
+  add("mlp_down", "out", "mlp_drop", "x");
+  add("mlp_drop", "out", "res2", "x");
+  add("res1", "out", "res2", "residual"); // mlp skip
+  add("res2", "out", "lnf", "x");
+  add("lnf", "out", "lm_head", "x");
+  add("lm_head", "out", "_output", "logits");
+  return e;
+}
+
+// build a variant's placed nodes + wired edges; endX is where the _output pseudo-node sits
+export function buildSeed(v: SeedVariant): { nodes: PlacedNode[]; edges: SeedEdge[]; endX: number } {
+  const stages = stagesFor(v);
+  const nodes: PlacedNode[] = [];
+  const kvW = typeWidth("kv_cache");
+  const under = v.rope ? "rope" : "qkv"; // the kv branch hangs below this stage
+
+  let x = 0;
+  for (const stage of stages) {
+    for (const n of stage) nodes.push({ id: n.id, type: n.type, x, y: n.y });
+    let advance = Math.max(...stage.map((n) => typeWidth(n.type))) + COL_GAP;
+    if (v.cache && stage.some((n) => n.id === under)) advance += kvW + COL_GAP; // room for kv below
+    x += advance;
+  }
+  if (v.cache) {
+    const u = nodes.find((n) => n.id === under)!;
+    nodes.push({ id: "kv", type: "kv_cache", x: u.x + typeWidth(u.type) + COL_GAP, y: ROW + 115 });
+  }
+  return { nodes, edges: seedEdges(v), endX: x };
+}

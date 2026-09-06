@@ -21,7 +21,6 @@ class ValidationResult:
 
 REQUIRED_NODE_TYPES = {
     "token_embedding",
-    "position_embedding",
     "qkv_proj",
     "attention_score",
     "softmax",
@@ -33,6 +32,8 @@ REQUIRED_NODE_TYPES = {
     "mlp_down",
     "lm_head",
 }
+
+POSITIONAL_NODE_TYPES = {"position_embedding", "rope"}
 
 
 class GraphValidator:
@@ -76,13 +77,19 @@ class GraphValidator:
     def _check_unknown_types(self, graph: GraphSpec, errors: list[str]):
         for node in graph.nodes:
             if node.type not in NODE_REGISTRY:
-                errors.append(f"unknown node type: {node.type} (node {node.id})")
+                errors.append(f"unsupported node type: {node.type} (node {node.id})")
 
     def _check_required_nodes(self, graph: GraphSpec, errors: list[str]):
         present = {n.type for n in graph.nodes}
-        for req in REQUIRED_NODE_TYPES:
+        required = set(REQUIRED_NODE_TYPES)
+        # flash attention fuses the score/softmax/value-sum chain, so those nodes aren't required
+        if "flash_attention" in present:
+            required -= {"attention_score", "softmax", "value_weighted_sum"}
+        for req in required:
             if req not in present:
                 errors.append(f"missing required node: {req}")
+        if not (present & POSITIONAL_NODE_TYPES):
+            errors.append("missing required node: position_embedding or rope")
 
     def _check_complete_path(self, flow: GraphSpec, errors: list[str]):
         # flow holds only the nodes on an _input -> _output path; empty means no such path exists
@@ -283,10 +290,16 @@ class GraphValidator:
 
     def _check_optional_warnings(self, graph: GraphSpec, warnings: list[str]):
         present = {n.type for n in graph.nodes}
-        if "causal_mask" not in present:
+        # flash attention masks causally inside its kernel, so it needs no causal_mask node
+        if "causal_mask" not in present and "flash_attention" not in present:
             warnings.append("causal mask removed - model sees future tokens")
         if "layernorm" not in present:
             warnings.append("no layer norm in pipeline - training may destabilize")
+        if "position_embedding" in present and "kv_cache" in present:
+            warnings.append(
+                "absolute position embedding recomputes the window past the context length"
+                " - use RoPE for a rolling cache"
+            )
 
         # 3 dropouts per block is normal (attn, resid-attn, resid-mlp) + 1 emb
         n_layer = sum(1 for n in graph.nodes if n.type == "qkv_proj")

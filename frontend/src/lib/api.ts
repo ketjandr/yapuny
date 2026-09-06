@@ -4,8 +4,8 @@ import type {
 } from "./types";
 
 const j = (r: Response) => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json(); };
-const post = (path: string, body: unknown) =>
-  fetch(`/api${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+const post = (path: string, body: unknown, signal?: AbortSignal) =>
+  fetch(`/api${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
 
 export const api = {
   validate: (graph: GraphRequest) => post("/graph/validate", graph).then(j),
@@ -29,14 +29,15 @@ export const api = {
   trainStop: () => post("/train/stop", {}).then(j),
   trainStatus: () => fetch("/api/train/status").then(j),
   trainBenchStatus: () => fetch("/api/train/bench/status").then(j),
+  workerActivity: () => fetch("/api/worker/activity").then(j), // what occupies the GPU (train/infer)
 
   // streaming endpoints return the raw Response; read with lib/sse.ts
   trainStream: (req: TrainRequest) => post("/train/stream", req),
   trainFollow: () => fetch("/api/train/follow"), // reattach to an in-progress run (no start)
   trainBench: (req: TrainBenchRequest) => post("/train/bench", req), // sequential multi-model bench
   trainBenchFollow: () => fetch("/api/train/bench/follow"),
-  generateStream: (req: GenerateRequest) => post("/generate/stream", req),
-  benchStream: (req: BenchRunRequest) => post("/bench/generate", req),
+  generateStream: (req: GenerateRequest, signal?: AbortSignal) => post("/generate/stream", req, signal),
+  benchStream: (req: BenchRunRequest, signal?: AbortSignal) => post("/bench/generate", req, signal),
 
   profile: (req: ProfileRequest) => post("/bench/profile", req).then(j),
 };

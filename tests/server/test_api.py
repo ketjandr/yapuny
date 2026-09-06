@@ -11,7 +11,6 @@ from server.api.schemas import (
     GraphRequest,
     ModelGraphRequest,
     NodeSchema,
-    PrepareDataRequest,
     TrainRequest,
 )
 from server.app import app
@@ -158,13 +157,6 @@ class TestTrainRequest:
         assert r.bench is True
 
 
-class TestPrepareDataRequest:
-    def test_defaults(self):
-        r = PrepareDataRequest()
-        assert r.vocab_size == 8000
-        assert r.val_fraction == 0.1
-
-
 # -- route-level tests --
 
 
@@ -260,18 +252,28 @@ def _parse_sse(text: str) -> list[dict]:
 
 
 # bench sits on top of trained models: seed the locker with a package (real state_dict
-# + the committed tokenizer) so bench can load weights by id without actually training.
+# + a per-model tokenizer) so bench can load weights by id without actually training.
 def _seed_package(model_id, graph_dict):
-    from data.tokenizer import load_tokenizer
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from data.tokenizer import train_tokenizer
     from server.compiler.compiler import GraphCompiler
     from server.compiler.utils import graph_structure_hash
     from server.models.graph import GraphSpec
     from worker import store
-    from worker.worker import TOKENIZER_PATH
 
     spec = GraphSpec.from_dict(graph_dict)
     model = GraphCompiler().compile(spec)
-    tok = load_tokenizer(TOKENIZER_PATH)
+    # each model carries its own tokenizer; train a tiny one on a throwaway corpus for the test
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write("the quick brown fox jumps over the lazy dog. " * 50)
+        corpus = f.name
+    try:
+        tok = train_tokenizer(Path(corpus), vocab_size=graph_dict["meta"]["vocab_size"])
+    finally:
+        os.unlink(corpus)
     store.save(model_id, tok, model.state_dict(), graph_structure_hash(spec))
 
 

@@ -180,6 +180,10 @@
 .react-flow__edge:hover:not(.selected) .react-flow__edge-path {
   stroke: var(--txt2);
 }
+/* graph-boundary edges (from _input / to _output): dashed, so seeds read apart from data flow */
+.react-flow__edge.edge-io .react-flow__edge-path {
+  stroke-dasharray: 5 4;
+}
 /* edges the current block error blames (multiple input/output tensors): glowing red */
 .react-flow__edge.edge-error .react-flow__edge-path {
   stroke: var(--red);

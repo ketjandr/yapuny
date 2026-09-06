@@ -364,6 +364,16 @@
     #a9b1c0 50% 100%
   );
 }
+/* rope + kv cache + flash: the ice (attention) accent */
+.tpl-glyph[data-tpl="cached"] {
+  border-color: var(--ice);
+  background: color-mix(in srgb, var(--ice) 20%, transparent);
+}
+/* everything on: a chromatic sweep across all the accent hues */
+.tpl-glyph[data-tpl="optimized"] {
+  border-color: transparent;
+  background: conic-gradient(from 210deg, #e6a24d, #8fce6a, #77d3e6, #b892e0, #d9738a, #e6a24d);
+}
 .tpl-label {
   font-size: 13px;
   font-weight: 500;

@@ -2,7 +2,7 @@
 // its id doubles as the backend model id (model cache + weight locker key). The index (titles +
 // timestamps) is stored separately from each project's canvas blob (lib/persist.ts).
 import type { Edge, Node } from "@xyflow/react";
-import { DEFAULT_META } from "./defaultGraph";
+import { ABS_VARIANT, DEFAULT_META, OPT_VARIANT, type SeedVariant } from "./defaultGraph";
 import { blankToCanvas, makeFusionEdge, seedToCanvas, type YNodeData } from "./graph";
 import { cleanEdges, cleanNodes, type PersistedCanvas } from "./persist";
 
@@ -48,10 +48,12 @@ export function writeProjects(projects: Project[]): void {
 export type TemplateKey =
   | "blank"
   | "unfused"
+  | "cached"
   | "fused"
   | "quantized"
   | "quantized_w4"
-  | "fused_quant";
+  | "fused_quant"
+  | "optimized";
 
 export interface Template {
   key: TemplateKey;
@@ -62,6 +64,11 @@ export interface Template {
 export const TEMPLATES: Template[] = [
   { key: "blank", label: "Blank", desc: "An empty canvas with just the input and output endpoints." },
   { key: "unfused", label: "Unfused GPT", desc: "The default transformer without optimizations." },
+  {
+    key: "cached",
+    label: "Cached GPT",
+    desc: "Rotary positions + a rolling KV cache + flash attention for fast generation.",
+  },
   { key: "fused", label: "Fused GPT", desc: "Every fusable op merged into a single Triton kernel." },
   { key: "quantized", label: "Quantized GPT (W8)", desc: "Every linear-weight node quantized to W8." },
   { key: "quantized_w4", label: "Quantized GPT (W4)", desc: "Every linear-weight node quantized to W4." },
@@ -70,17 +77,27 @@ export const TEMPLATES: Template[] = [
     label: "Fused + Quantized",
     desc: "Fusable ops fused, the remaining linear weights quantized to W8.",
   },
+  {
+    key: "optimized",
+    label: "Fully Optimized GPT",
+    desc: "Everything on: rope, rolling KV cache, flash attention, fusion, and W8 quantization.",
+  },
 ];
 
-// fusable chains in the seed graph (pipeline order), each mapping to one registry kernel. Picked to
-// satisfy the fusion rule that no mid-chain node has a consumer outside the chain.
-const FUSION_CHAINS: string[][] = [
+// fusable chains per seed variant (pipeline order), each mapping to one registry kernel. Picked to
+// satisfy the fusion rule that no mid-chain node has a consumer outside the chain. Flash attention
+// already fuses the score/mask/softmax chain, so the flash variant drops it.
+const ABS_FUSION_CHAINS: string[][] = [
   ["attn", "mask", "smax"], // FusedScaleMaskSoftmax
   ["attn_drop", "res1"], // FusedDropoutResidual
   ["mlp_up", "gelu"], // FusedLinearGELU
   ["mlp_down", "mlp_drop", "res2"], // FusedLinearDropoutResidual
 ];
-const FUSED_IDS = new Set(FUSION_CHAINS.flat());
+const FLASH_FUSION_CHAINS: string[][] = [
+  ["attn_drop", "res1"],
+  ["mlp_up", "gelu"],
+  ["mlp_down", "mlp_drop", "res2"],
+];
 
 // seed ids of the quantizable linear-weight nodes (qkv/out proj, mlp up/down, lm head)
 const QUANTIZABLE_IDS = ["qkv", "oproj", "mlp_up", "mlp_down", "lm_head"];
@@ -100,28 +117,32 @@ function quantize(nodes: Node[], ids: Set<string>, mode: string): Node[] {
 // build the initial persisted canvas for a template
 export function templateCanvas(key: TemplateKey): PersistedCanvas {
   const gpt = key !== "blank";
-  const { nodes: seedNodes, edges: seedEdges } = gpt ? seedToCanvas() : blankToCanvas();
+  // cached + optimized use rope + rolling kv cache + flash attention; the rest are the absolute base
+  const variant: SeedVariant = key === "cached" || key === "optimized" ? OPT_VARIANT : ABS_VARIANT;
+  const { nodes: seedNodes, edges: seedEdges } = gpt ? seedToCanvas(variant) : blankToCanvas();
 
-  const fuse = key === "fused" || key === "fused_quant";
+  const fuse = key === "fused" || key === "fused_quant" || key === "optimized";
+  const chains = variant.flash ? FLASH_FUSION_CHAINS : ABS_FUSION_CHAINS;
+  const fusedIds = new Set(chains.flat());
   const quantMode = key === "quantized_w4" ? "w4" : "w8";
-  // fully quantized: every quantizable node; combined: only those not fused (a node can't be both)
+  // fully quantized: every quantizable node; combined/optimized: only those not fused (a node can't be both)
   const quantIds =
     key === "quantized" || key === "quantized_w4"
       ? new Set(QUANTIZABLE_IDS)
-      : key === "fused_quant"
-        ? new Set(QUANTIZABLE_IDS.filter((id) => !FUSED_IDS.has(id)))
+      : key === "fused_quant" || key === "optimized"
+        ? new Set(QUANTIZABLE_IDS.filter((id) => !fusedIds.has(id)))
         : new Set<string>();
 
   const nodes = quantIds.size ? quantize(seedNodes, quantIds, quantMode) : seedNodes;
-  const edges = fuse ? [...seedEdges, ...fusionEdges(FUSION_CHAINS)] : seedEdges;
+  const edges = fuse ? [...seedEdges, ...fusionEdges(chains)] : seedEdges;
 
   return {
     nodes: cleanNodes(nodes),
     edges: cleanEdges(edges),
     meta: DEFAULT_META,
-    // fusion + quantization are inference-only transforms, so open those templates in inference
-    // mode where the fusion beams and W8 badges actually show
-    mode: fuse || quantIds.size ? "inference" : "train",
+    // fusion, quantization and the kv cache all show their effect in inference mode (beams, W8
+    // badges, the cache active instead of greyed), so open those templates there
+    mode: fuse || quantIds.size || variant.cache ? "inference" : "train",
     blockStart: gpt ? "ln1" : null,
     blockEnd: gpt ? "res2" : null,
     lastCompiled: null,

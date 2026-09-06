@@ -24,12 +24,21 @@ export interface TrainHp {
   learningRate: number;
 }
 
+// per-project generation settings (prompt + sampling), remembered like the training hyperparameters
+export interface GenHp {
+  prompt: string;
+  temperature: number;
+  topK: number;
+  maxTokens: number;
+}
+
 export interface PersistedCanvas extends CompiledSnapshot {
   mode: "train" | "inference";
   lastCompiled: CompiledSnapshot | null;
   viewport: Viewport | null;
   benchOpen?: { train: boolean; inference: boolean }; // benchmark section toggle, per mode
   train?: TrainHp; // training hyperparameters (steps/batch/lr)
+  gen?: GenHp; // generation settings (prompt + sampling)
 }
 
 // reset transient flags so selection/drag state neither triggers a save nor persists

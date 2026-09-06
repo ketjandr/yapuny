@@ -22,6 +22,7 @@ import {
   cleanEdges,
   cleanNodes,
   type CompiledSnapshot,
+  type GenHp,
   loadCanvas,
   type PersistedCanvas,
   type TrainHp,
@@ -42,6 +43,15 @@ export const STEPS_MAX = 20000;
 export const BATCH_MIN = 1;
 export const BATCH_MAX = 512;
 export const DEFAULT_TRAIN: TrainHp = { maxSteps: 500, batchSize: 16, learningRate: 3e-4 };
+
+// generation setting bounds + defaults (temperature is a float; top_k / tokens are integers)
+export const TEMP_MIN = 0;
+export const TEMP_MAX = 2;
+export const TOPK_MIN = 1;
+export const TOPK_MAX = 1000;
+export const TOKENS_MIN = 1;
+export const TOKENS_MAX = 2048;
+export const DEFAULT_GEN: GenHp = { prompt: "The ", temperature: 0.8, topK: 200, maxTokens: 256 };
 
 // View mode; the hook point for mode-specific rendering (grey kv_cache, T/S, fusion/quant).
 export type CanvasMode = "train" | "inference";
@@ -98,6 +108,7 @@ interface CanvasState {
   clipboard: Clipboard | null;
   benchOpen: { train: boolean; inference: boolean }; // benchmark section toggle, persisted per mode
   train: TrainHp; // training hyperparameters (steps/batch/lr), persisted per project
+  gen: GenHp; // generation settings (prompt + sampling), persisted per project
   focusRequest: { id: string; nonce: number } | null; // pan-to-node request (from the profiler); not persisted
 
   onNodesChange: (changes: NodeChange[]) => void;
@@ -123,6 +134,7 @@ interface CanvasState {
   setMode: (mode: CanvasMode) => void;
   setBenchOpen: (mode: CanvasMode, open: boolean) => void;
   setTrainHp: (patch: Partial<TrainHp>) => void;
+  setGenHp: (patch: Partial<GenHp>) => void;
   setViewport: (vp: Viewport) => void;
   requestFocusNode: (id: string) => void; // ask the canvas to pan to a node (no-op'd by canvas if absent)
   setSaveStatus: (status: "saving" | "saved") => void;
@@ -191,6 +203,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   clipboard: null,
   benchOpen: { train: false, inference: false },
   train: DEFAULT_TRAIN,
+  gen: DEFAULT_GEN,
   focusRequest: null,
 
   // needsCompile/trained are NOT tracked here — the backend (worker model cache + weight locker) is
@@ -385,6 +398,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setBenchOpen: (mode, open) => set((s) => ({ benchOpen: { ...s.benchOpen, [mode]: open } })),
 
   setTrainHp: (patch) => set((s) => ({ train: { ...s.train, ...patch } })),
+
+  setGenHp: (patch) => set((s) => ({ gen: { ...s.gen, ...patch } })),
   setViewport: (viewport) => set({ viewport }), // pan/zoom is cosmetic -> no needsCompile
 
   // nonce makes each request distinct so the canvas re-pans even to the same node twice in a row
@@ -415,6 +430,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       lastCompiled: c.lastCompiled,
       benchOpen: c.benchOpen ?? { train: false, inference: false },
       train: c.train ?? DEFAULT_TRAIN,
+      gen: c.gen ?? DEFAULT_GEN,
       modelId: id,
       selectedId: null,
       saveStatus: "saved",
@@ -449,6 +465,7 @@ function persistableOf(s: CanvasState): PersistedCanvas {
     blockEnd: s.blockEnd,
     benchOpen: s.benchOpen,
     train: s.train,
+    gen: s.gen,
   };
 }
 

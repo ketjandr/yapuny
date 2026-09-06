@@ -12,6 +12,7 @@ from nodes.attention import (
     KVCache,
     OutProjection,
     QKVProjection,
+    RoPE,
     Softmax,
     ValueWeightedSum,
 )
@@ -52,11 +53,17 @@ NODE_REGISTRY: dict[str, NodeDef] = {
         build_args={"n_embd": "n_embd", "n_head": "n_head"},
         quantize_attr="proj",
     ),
+    "rope": NodeDef(
+        cls=RoPE,
+        inputs=["q", "k", "positions"],
+        outputs=["q", "k"],
+        build_args={"head_dim": "n_embd // n_head"},
+    ),
     "kv_cache": NodeDef(
         cls=KVCache,
         inputs=["k", "v"],
         outputs=["k", "v"],
-        build_args={},
+        build_args={"block_size": "block_size"},
     ),
     "attention_score": NodeDef(
         cls=AttentionScore,

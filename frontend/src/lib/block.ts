@@ -95,7 +95,10 @@ export function analyzeBlock(
   // of them, so the wiring stays unambiguous. Zero or multiple distinct tensors break that.
   const inEdges = edges.filter((e) => nodeIds.has(e.target) && !nodeIds.has(e.source));
   const outEdges = edges.filter((e) => nodeIds.has(e.source) && !nodeIds.has(e.target));
-  const inTensors = new Set(inEdges.map((e) => `${e.source}.${e.sourceHandle}`));
+  // _input (idx / positions) is a broadcast seed fed to every unrolled layer (e.g. rope's
+  // positions), so it isn't the carried loop input - the single-input rule ignores it
+  const carriedIn = inEdges.filter((e) => e.source !== "_input");
+  const inTensors = new Set(carriedIn.map((e) => `${e.source}.${e.sourceHandle}`));
   const outTensors = new Set(outEdges.map((e) => `${e.source}.${e.sourceHandle}`));
 
   if (inTensors.size === 0)
@@ -105,7 +108,7 @@ export function analyzeBlock(
       nodeIds,
       valid: false,
       error: `block has ${inTensors.size} input tensors, it must have exactly one`,
-      problemEdgeIds: inEdges.map((e) => e.id),
+      problemEdgeIds: carriedIn.map((e) => e.id),
     };
 
   if (outTensors.size === 0)
@@ -118,11 +121,12 @@ export function analyzeBlock(
       problemEdgeIds: outEdges.map((e) => e.id),
     };
 
-  // loop-back: block output must be shape-compatible with each input target, or it can't stack
+  // loop-back: block output must be shape-compatible with each carried input target, or it can't
+  // stack. Broadcast (_input) targets aren't fed by the output, so they're exempt.
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const exit = outEdges[0];
   const exitShape = portShape(byId.get(exit.source), exit.sourceHandle, true);
-  const mismatched = inEdges.filter(
+  const mismatched = carriedIn.filter(
     (e) => !sameShape(exitShape, portShape(byId.get(e.target), e.targetHandle, false)),
   );
   if (mismatched.length > 0) {

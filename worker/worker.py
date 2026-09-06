@@ -75,6 +75,24 @@ class Worker:
         self.training_id = None
         self.train_state = None  # single-model run (POST /train/stream)
         self.bench_state = None  # multi-model benchmark run (POST /train/bench)
+        self.inferring = False  # a generate / inference-benchmark run holds the GPU
+        # what currently occupies the GPU: {"kind": train|train_bench|generate|gen_bench,
+        # "model_id"} or None. One universal busy signal every project reads to gate its controls.
+        self.activity = None
+
+    @property
+    def busy(self) -> bool:
+        # the GPU runs one job at a time - training and inference are mutually exclusive
+        return self.training or self.inferring
+
+    def set_activity(self, kind: str, model_id: str):
+        self.activity = {"kind": kind, "model_id": model_id}
+
+    def clear_activity(self):
+        self.activity = None
+
+    def get_activity(self):
+        return {"active": self.activity}
 
     def upload_corpus(self, content: bytes, filename: str):
         if len(content) > MAX_CORPUS_BYTES:
@@ -192,6 +210,7 @@ class Worker:
         has_opts, plain_graph, model = self._compile_fresh(entry)
         self.training = True
         self.training_id = model_id
+        self.set_activity("train", model_id)
         self.train_state = {
             "step": 0,
             "max_steps": max_steps,
@@ -231,6 +250,7 @@ class Worker:
         finally:
             self.training = False
             self.training_id = None
+            self.clear_activity()
 
     def train_bench(
         self,
@@ -262,6 +282,7 @@ class Worker:
             entries.append((mid, e))
 
         self.training = True
+        self.set_activity("train_bench", model_ids[0])
         self.bench_state = {
             "status": "running",
             "current": 0,
@@ -309,6 +330,7 @@ class Worker:
             self.bench_state["error"] = str(e)
         finally:
             self.training = False
+            self.clear_activity()
 
     def _tokenize_corpus(self, vocab_size: int, val_fraction: float = 0.1):
         """Train a fresh BPE tokenizer on the corpus at `vocab_size`, then tokenize + split it.
@@ -555,6 +577,11 @@ class Worker:
         block_size = model.meta["block_size"]
         tokens = []
 
+        # rotary positions (a rope node) make the KVCache rollable: decoding stays incremental past
+        # the context window (the cache evicts oldest). Absolute position_embedding graphs instead
+        # recompute the window on overflow. `rolling` picks which path the loop below takes.
+        rolling = "rope" in model.node_types.values()
+
         if bench:
             if self.device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats(self.device)
@@ -562,6 +589,8 @@ class Worker:
 
         # prefill - whole prompt in one pass, seeds the cache if the graph has one
         logits, _, caches = model(idx[:, -block_size:])
+        # absolute position of the next token to generate (prefill consumed the last block_size)
+        pos = min(idx.shape[1], block_size)
 
         if bench:
             t_prefill_end = self._stamp()
@@ -592,11 +621,16 @@ class Worker:
                 break  # have every token - skip the unused final forward
 
             cached_len = cache_length(caches)
-            if cached_len is not None and cached_len < block_size:
+            if rolling and cached_len is not None:
+                # rotary + rolling cache: keep decoding one token at its absolute position forever;
+                # the cache evicts its oldest entry when it would exceed block_size
+                logits, _, caches = model(next_id, caches=caches, pos_offset=pos)
+                pos += 1
+            elif cached_len is not None and cached_len < block_size:
                 # decode - feed only the new token, reuse cached k/v
                 logits, _, caches = model(next_id, caches=caches)
             else:
-                # no kv_cache node, or context window full - recompute the window
+                # no kv_cache node, or absolute positions with a full window - recompute the window
                 logits, _, _ = model(idx[:, -block_size:])
 
         full_text = decode(tok, tokens) if tok else None

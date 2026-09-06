@@ -1,11 +1,13 @@
 import json
+import os
+import tempfile
+from pathlib import Path
 
 import pytest
 import torch
 
-from data.tokenizer import load_tokenizer
+from data.tokenizer import train_tokenizer
 from worker import store
-from worker.worker import TOKENIZER_PATH
 
 
 @pytest.fixture
@@ -17,7 +19,14 @@ def models_dir(tmp_path, monkeypatch):
 
 @pytest.fixture
 def tokenizer():
-    return load_tokenizer(TOKENIZER_PATH)
+    # models carry their own tokenizer now; train a tiny one on a throwaway corpus for the test
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write("the quick brown fox jumps over the lazy dog. " * 50)
+        corpus = f.name
+    try:
+        return train_tokenizer(Path(corpus), vocab_size=512)
+    finally:
+        os.unlink(corpus)
 
 
 def _weights():

@@ -105,7 +105,12 @@ def expand_blocks(graph: GraphSpec) -> GraphSpec:
         else:
             external.append(e)
 
-    in_srcs = {(e.from_node, e.from_port) for e in in_edges}
+    # edges from _input (idx / positions) are broadcast seeds - the same tensor feeds every layer
+    # (e.g. RoPE's positions), so they aren't the carried loop input and don't count toward it
+    carried_in = [e for e in in_edges if e.from_node != "_input"]
+    broadcast_in = [e for e in in_edges if e.from_node == "_input"]
+
+    in_srcs = {(e.from_node, e.from_port) for e in carried_in}
     out_srcs = {(e.from_node, e.from_port) for e in out_edges}
     if len(in_srcs) != 1:
         raise ValueError(f"block must have exactly one input tensor, got {len(in_srcs)}")
@@ -136,8 +141,11 @@ def expand_blocks(graph: GraphSpec) -> GraphSpec:
             )
         # layer 0 takes the block's external input; later layers take the previous layer's output
         entry_node, entry_port = in_src if layer == 0 else (rid(layer - 1, out_node), out_port)
-        for e in in_edges:
+        for e in carried_in:
             new_edges.append(EdgeSpec(entry_node, rid(layer, e.to_node), entry_port, e.to_port))
+        # broadcast seeds (from _input) feed every layer unchanged
+        for e in broadcast_in:
+            new_edges.append(EdgeSpec(e.from_node, rid(layer, e.to_node), e.from_port, e.to_port))
     # the last layer's output feeds the epilogue
     for e in out_edges:
         new_edges.append(EdgeSpec(rid(n - 1, out_node), e.to_node, out_port, e.to_port))
