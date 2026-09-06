@@ -1,5 +1,5 @@
 // Models home: a grid of the user's projects.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { BrandButton } from "@/components/BrandButton";
 import { GraphThumbnail } from "@/components/GraphThumbnail";
@@ -72,7 +72,27 @@ export function ModelsPage() {
 function ModelCard({ project, onOpen }: { project: Project; onOpen: () => void }) {
   const rename = useProjectsStore((s) => s.rename);
   const remove = useProjectsStore((s) => s.remove);
+  const duplicate = useProjectsStore((s) => s.duplicate);
   const [confirming, setConfirming] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // close the menu on an outside click or Escape
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
 
   return (
     <div className="mcard">
@@ -93,15 +113,44 @@ function ModelCard({ project, onOpen }: { project: Project; onOpen: () => void }
         />
         <div className="mcard-sub">edited {relativeTime(project.updatedAt)}</div>
       </div>
-      <button
-        className="mcard-del"
-        type="button"
-        title="Delete model"
-        onClick={() => setConfirming(true)}
-        aria-label="Delete model"
-      >
-        ✕
-      </button>
+      <div className="mcard-menu" ref={menuRef}>
+        <button
+          className="mcard-menu-btn"
+          type="button"
+          title="Model actions"
+          aria-label="Model actions"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          ⋯
+        </button>
+        {menuOpen && (
+          <div className="mcard-pop" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                duplicate(project.id);
+                setMenuOpen(false);
+              }}
+            >
+              Duplicate
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="danger"
+              onClick={() => {
+                setMenuOpen(false);
+                setConfirming(true);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        )}
+      </div>
       {confirming && (
         <div className="mcard-confirm">
           <span>Delete this model?</span>

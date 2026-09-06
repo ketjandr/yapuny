@@ -192,17 +192,20 @@
   color: var(--faint);
   padding: 0 5px;
 }
-/* delete: a small corner button that appears on hover */
-.mcard-del {
+/* actions: a kebab (triple-dot) button in the corner that appears on hover, opening a small menu */
+.mcard-menu {
   position: absolute;
   top: 8px;
   right: 8px;
+}
+.mcard-menu-btn {
   width: 24px;
   height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1;
   color: var(--txt2);
   background: color-mix(in srgb, var(--bg) 70%, transparent);
   border: 1px solid var(--line2);
@@ -211,12 +214,45 @@
   transition: opacity 0.12s ease;
   backdrop-filter: blur(3px);
 }
-.mcard:hover .mcard-del {
+.mcard:hover .mcard-menu-btn,
+.mcard-menu-btn[aria-expanded="true"] {
   opacity: 1;
 }
-.mcard-del:hover {
+.mcard-menu-btn:hover,
+.mcard-menu-btn[aria-expanded="true"] {
+  color: var(--txt);
+  border-color: var(--line3);
+}
+/* the dropdown menu */
+.mcard-pop {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  z-index: 3;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line3);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.mcard-pop button {
+  text-align: left;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  color: var(--txt2);
+  background: none;
+  border: 0;
+}
+.mcard-pop button:hover {
+  background: var(--panel2);
+  color: var(--txt);
+}
+.mcard-pop button.danger:hover {
   color: var(--red);
-  border-color: color-mix(in srgb, var(--red) 45%, var(--line2));
 }
 /* delete confirmation overlay covering the card */
 .mcard-confirm {

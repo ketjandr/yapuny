@@ -3,7 +3,7 @@
 // via the /model DELETE api; touch bumps the "last edited" timestamp (called by the canvas autosave).
 import { create } from "zustand";
 import { api } from "@/lib/api";
-import { deleteCanvas, writeCanvas } from "@/lib/persist";
+import { deleteCanvas, loadCanvas, writeCanvas } from "@/lib/persist";
 import {
   loadProjects,
   newProjectId,
@@ -16,6 +16,7 @@ import {
 interface ProjectsState {
   projects: Project[];
   create: (template: TemplateKey) => string; // returns the new project id
+  duplicate: (id: string) => string | null; // copy a project's canvas to a new id; returns it
   remove: (id: string) => void;
   rename: (id: string, title: string) => void;
   touch: (id: string) => void;
@@ -27,7 +28,7 @@ function save(projects: Project[]): Project[] {
   return projects;
 }
 
-export const useProjectsStore = create<ProjectsState>((set) => ({
+export const useProjectsStore = create<ProjectsState>((set, get) => ({
   projects: loadProjects(),
 
   create: (template) => {
@@ -37,6 +38,20 @@ export const useProjectsStore = create<ProjectsState>((set) => ({
     const project: Project = { id, title: "Untitled model", createdAt: now, updatedAt: now };
     set((s) => ({ projects: save([project, ...s.projects]) }));
     return id;
+  },
+
+  // copy the source project's canvas (the design) to a fresh id. The backend model is keyed by id,
+  // so the copy starts uncompiled / untrained - it's a duplicate of the graph, not the weights.
+  duplicate: (id) => {
+    const src = loadCanvas(id);
+    if (!src) return null; // no canvas to copy (shouldn't happen for a real project)
+    const newId = newProjectId();
+    writeCanvas(newId, src); // loadCanvas returns a fresh parse, so no aliasing with the original
+    const now = Date.now();
+    const title = `${get().projects.find((p) => p.id === id)?.title ?? "Untitled model"} copy`;
+    const project: Project = { id: newId, title, createdAt: now, updatedAt: now };
+    set((s) => ({ projects: save([project, ...s.projects]) }));
+    return newId;
   },
 
   remove: (id) => {
