@@ -578,6 +578,7 @@
 /* generate */
 .gen-prompt {
   width: 100%;
+  min-height: 64px; /* default floor; drag the handle to grow */
   resize: vertical;
   font-family: var(--mono);
   font-size: 12px;
@@ -588,12 +589,18 @@
   padding: 8px;
   outline: none;
 }
+.gen-prompt.tall {
+  min-height: 88px; /* full-view */
+}
 .gen-prompt:focus {
   border-color: var(--line3);
 }
 .gen-output {
-  min-height: 84px;
-  max-height: 260px;
+  /* definite height so streamed tokens scroll inside instead of pushing the pane down; the resize
+     handle overrides it (min-height is the drag floor / default) */
+  height: 160px;
+  min-height: 160px;
+  resize: vertical;
   overflow-y: auto;
   font-size: 12px;
   line-height: 1.5;
@@ -613,6 +620,10 @@
 .gen-output::-webkit-scrollbar-thumb {
   background: var(--line3);
   border-radius: 3px;
+}
+.gen-output.tall {
+  height: 300px; /* full-view */
+  min-height: 300px;
 }
 .gen-output.bad {
   color: var(--red);

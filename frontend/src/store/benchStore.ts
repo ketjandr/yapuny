@@ -26,7 +26,8 @@ export interface BenchColumn {
   prefillMs: number | null;
   peakVramMb: number | null;
   profile: NodeProfile[]; // per-node decode profile (arrives once the model finishes)
-  text: string; // streamed generation - the model's actual output, inspectable per model
+  text: string; // streamed generation - shown as the canonical output while this column runs
+  genTokens: number; // tokens generated so far (live count, for the current-model stat row)
   running: boolean; // this column is the one currently generating (runs are sequential)
   error: string | null;
   done: boolean;
@@ -84,6 +85,7 @@ export const useBenchStore = create<BenchState>((set, get) => ({
         peakVramMb: null,
         profile: [],
         text: "",
+        genTokens: 0,
         running: false,
         error: null,
         done: false,
@@ -110,17 +112,29 @@ export const useBenchStore = create<BenchState>((set, get) => ({
     }
     useWorkerStore.getState().refresh(); // this run now owns the GPU
 
+    let firstAt = 0; // first-token timestamp of the running column, for a live decode tok/s
     try {
       for await (const ev of readSSE(res)) {
         const gi: number | undefined = ev.data?.graph_idx;
         // the trailing done (env only, no graph_idx) marks the whole run complete
         if (ev.event === "done" && gi === undefined) break;
         if (gi === undefined) continue;
-        if (ev.event === "graph_start") patch(gi, (c) => ({ ...c, running: true }));
-        else if (ev.event === "error") patch(gi, (c) => ({ ...c, error: ev.data.error, running: false, done: true }));
+        if (ev.event === "graph_start") {
+          firstAt = 0;
+          patch(gi, (c) => ({ ...c, running: true, text: "", genTokens: 0 }));
+        } else if (ev.event === "error") patch(gi, (c) => ({ ...c, error: ev.data.error, running: false, done: true }));
         else if (ev.event === "prefill") patch(gi, (c) => ({ ...c, prefillMs: ev.data.prefill_ms }));
-        else if (ev.event === "token") patch(gi, (c) => ({ ...c, text: c.text + (ev.data.text ?? "") }));
-        else if (ev.event === "profile") patch(gi, (c) => ({ ...c, profile: ev.data.nodes ?? [] }));
+        else if (ev.event === "token") {
+          const now = performance.now();
+          if (firstAt === 0) firstAt = now;
+          const secs = (now - firstAt) / 1000;
+          patch(gi, (c) => {
+            const n = c.genTokens + 1;
+            // live decode rate (tokens after the first); the final `done` overwrites with the
+            // worker's authoritative number
+            return { ...c, text: c.text + (ev.data.text ?? ""), genTokens: n, tokensPerSec: n > 1 && secs > 0 ? (n - 1) / secs : c.tokensPerSec };
+          });
+        } else if (ev.event === "profile") patch(gi, (c) => ({ ...c, profile: ev.data.nodes ?? [] }));
         else if (ev.event === "done")
           patch(gi, (c) => ({
             ...c,

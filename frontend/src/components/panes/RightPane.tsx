@@ -9,7 +9,7 @@
 // it's locked while a run is in flight. Wired to the worker over SSE (trainStore / benchTrainStore /
 // benchStore / inferStore). Training and inference are mutually exclusive on the GPU - a universal
 // /worker/activity signal (workerStore) gates every project's Train / Generate accordingly.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 import { CorpusButton } from "@/components/CorpusModal";
 import { HelpDot } from "@/components/HelpDot";
 import { useTooltip } from "@/components/tooltipContext";
@@ -119,10 +119,7 @@ export function RightPane() {
         {mode === "train" ? (
           <TrainControls expanded={expanded} open={benchOpen.train} onToggle={(v) => setBenchOpen("train", v)} />
         ) : (
-          <>
-            <GenerateSection expanded={expanded} />
-            <InferenceBenchmark expanded={expanded} open={benchOpen.inference} onToggle={(v) => setBenchOpen("inference", v)} />
-          </>
+          <InferControls expanded={expanded} open={benchOpen.inference} onToggle={(v) => setBenchOpen("inference", v)} />
         )}
       </div>
     </PaneShell>
@@ -776,98 +773,21 @@ function GenParams({ disabled }: { disabled: boolean }) {
   );
 }
 
-function GenerateSection({ expanded }: { expanded: boolean }) {
-  const modelId = useCanvasStore((s) => s.modelId);
-  const projects = useProjectsStore((s) => s.projects);
-  const gen = useCanvasStore((s) => s.gen);
-  const setGenHp = useCanvasStore((s) => s.setGenHp);
-  const compiled = useCompileStore((s) => s.status === "ready");
-  const trained = useCompileStore((s) => s.trained);
-  const infer = useInferStore();
-  const activity = useWorkerStore((s) => s.activity);
-  const blocked = blockingActivity(activity, modelId, ["generate"]);
-  const titleOf = (id: string) => projects.find((p) => p.id === id)?.title ?? id;
-
-  const mine = infer.modelId === modelId;
-  const running = infer.status === "running" && mine;
-  const canGen = !blocked && compiled && trained;
-  const gate = blocked
-    ? busyLabel(blocked, titleOf(blocked.modelId))
-    : !compiled
-      ? "Compile the model before generating"
-      : !trained
-        ? "Train the model before generating"
-        : "";
-  const tip = useTooltip(gate);
-
-  const onGenerate = () => {
-    if (running) {
-      infer.stop();
-      return;
-    }
-    infer.start({ id: modelId, prompt: gen.prompt, max_new_tokens: gen.maxTokens, temperature: gen.temperature, top_k: gen.topK });
-  };
-
-  const output = mine ? infer.text : "";
-  const tps = mine && infer.tokensPerSec != null && (running || infer.status === "done") ? infer.tokensPerSec : null;
-
-  return (
-    <section className="grp">
-      <h3>
-        Generate
-        {tps != null && <span className="grp-sub mono">{tps.toFixed(1)} tok/s</span>}
-      </h3>
-      <div className="pan-body">
-        <textarea
-          className="gen-prompt"
-          placeholder="Enter a prompt…"
-          rows={expanded ? 4 : 3}
-          value={gen.prompt}
-          disabled={running}
-          onChange={(e) => setGenHp({ prompt: e.target.value })}
-        />
-        <GenParams disabled={running} />
-        <span className="btn-wrap" {...tip}>
-          <button type="button" className={`btn ${running ? "danger" : "primary"}`} disabled={!running && !canGen} onClick={onGenerate}>
-            {running ? "Stop" : "Generate"}
-          </button>
-        </span>
-        {mine && infer.status === "error" ? (
-          <div className="run-note bad">{infer.error}</div>
-        ) : (
-          <div className="gen-output mono">{output || (running ? "…" : "Output will stream here…")}</div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-// inference benchmark: pick up to 5 trained models, generate the same prompt on each, and compare
-// throughput/latency/vram in a table. Selecting a row inspects that model's config, output & profile.
-function InferenceBenchmark({ expanded, open, onToggle }: { expanded: boolean; open: boolean; onToggle: (v: boolean) => void }) {
+// Inference controls: Generate (the canonical prompt + streamed output + live stats) plus a
+// Benchmark section (per-model table + config/profile detail). Mirrors TrainControls - the parent
+// owns the compare set (this model + up to 4 picked others), and the benchmark toggle doubles as
+// "benchmark on": when on, the Generate button becomes "Generate & benchmark" and runs the compare.
+function InferControls({ expanded, open, onToggle }: { expanded: boolean; open: boolean; onToggle: (v: boolean) => void }) {
   const modelId = useCanvasStore((s) => s.modelId);
   const toGraph = useCanvasStore((s) => s.toGraph);
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const meta = useCanvasStore((s) => s.meta);
-  const gen = useCanvasStore((s) => s.gen);
-  const setGenHp = useCanvasStore((s) => s.setGenHp);
   const projects = useProjectsStore((s) => s.projects);
-  const compiled = useCompileStore((s) => s.status === "ready");
-  const trained = useCompileStore((s) => s.trained);
-  const bench = useBenchStore();
-  const activity = useWorkerStore((s) => s.activity);
-  const blocked = blockingActivity(activity, modelId, ["gen_bench"]);
+  const running = useBenchStore((s) => s.comparing && s.compareOwner === modelId);
   const titleOf = (id: string) => projects.find((p) => p.id === id)?.title ?? id;
 
   const [picked, setPicked] = useState<string[]>([]);
-  const others = projects.filter((p) => p.id !== modelId);
-
-  // results isolate to the project that started the run (column 0), like the training benchmark
-  const owned = bench.compareOwner === modelId;
-  const columns = owned ? bench.columns : [];
-  const running = bench.comparing && owned;
-  const toggle = (id: string) => setPicked((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= 4 ? s : [...s, id]));
 
   const entries = useMemo<CompareEntry[]>(() => {
     const cur: CompareEntry = { id: modelId, graph: toGraph(), title: titleOf(modelId) };
@@ -886,28 +806,187 @@ function InferenceBenchmark({ expanded, open, onToggle }: { expanded: boolean; o
   const [detailId, setDetailId] = useState<string | null>(null);
   const detail = detailId ?? entries[0]?.id;
 
-  // gating: every selected model must be compiled + trained, and the worker free
+  return (
+    <>
+      <GenerateSection
+        expanded={expanded}
+        benchOn={open}
+        entries={entries}
+        infos={infos}
+        detail={detail}
+        onBenchStart={() => setDetailId(entries[0]?.id ?? null)}
+      />
+      <InferenceBenchmark
+        expanded={expanded}
+        open={open}
+        onToggle={onToggle}
+        entries={entries}
+        infos={infos}
+        picked={picked}
+        setPicked={setPicked}
+        detail={detail}
+        onSelect={setDetailId}
+        running={running}
+      />
+    </>
+  );
+}
+
+// Generate: the canonical prompt, sampling params, run button, streamed output, and a live stat row
+// (tok/s, tokens, ttft) - the inference analog of the training Train section. With the benchmark
+// toggle on, the button runs the compare instead and the output/stats follow the model currently
+// generating, exactly like the training section tracks the current model during a bench run.
+function GenerateSection({
+  expanded,
+  benchOn,
+  entries,
+  infos,
+  detail,
+  onBenchStart,
+}: {
+  expanded: boolean;
+  benchOn: boolean;
+  entries: CompareEntry[];
+  infos: Record<string, CompareInfo>;
+  detail?: string;
+  onBenchStart: () => void;
+}) {
+  const modelId = useCanvasStore((s) => s.modelId);
+  const projects = useProjectsStore((s) => s.projects);
+  const gen = useCanvasStore((s) => s.gen);
+  const setGenHp = useCanvasStore((s) => s.setGenHp);
+  const compiled = useCompileStore((s) => s.status === "ready");
+  const trained = useCompileStore((s) => s.trained);
+  const infer = useInferStore();
+  const bench = useBenchStore();
+  const activity = useWorkerStore((s) => s.activity);
+  const blocked = blockingActivity(activity, modelId, benchOn ? ["gen_bench"] : ["generate"]);
+  const titleOf = (id: string) => projects.find((p) => p.id === id)?.title ?? id;
+
+  // run-in-progress: a compare owned by this project (benchOn) or this project's single generate
+  const single = infer.modelId === modelId;
+  const running = benchOn ? bench.comparing && bench.compareOwner === modelId : infer.status === "running" && single;
+
+  // gating: bench needs every selected model compiled+trained; single needs the open model ready
   const ready = (id: string) => (id === modelId ? compiled && trained : Boolean(infos[id]?.ready && infos[id]?.trained));
   const allReady = entries.every((e) => ready(e.id));
-  const canRun = !blocked && allReady;
+  const canStart = !blocked && (benchOn ? allReady : compiled && trained);
   const gate = blocked
     ? busyLabel(blocked, titleOf(blocked.modelId))
-    : !allReady
+    : benchOn && !allReady
       ? "Compile and train every selected model first"
-      : "";
+      : !compiled
+        ? "Compile the model before generating"
+        : !trained
+          ? "Train the model before generating"
+          : "";
   const tip = useTooltip(gate);
 
-  const onRun = () => {
+  const opts = () => ({ prompt: gen.prompt, max_new_tokens: gen.maxTokens, temperature: gen.temperature, top_k: gen.topK });
+
+  const onGenerate = () => {
     if (running) {
-      bench.stopCompare();
+      if (benchOn) bench.stopCompare();
+      else infer.stop();
       return;
     }
-    setDetailId(entries[0]?.id ?? null);
-    bench.runCompare(
-      entries.map((e) => ({ id: e.id, graph: e.graph, label: e.title })),
-      { prompt: gen.prompt, max_new_tokens: gen.maxTokens, temperature: gen.temperature, top_k: gen.topK },
-    );
+    if (benchOn) {
+      onBenchStart();
+      bench.runCompare(entries.map((e) => ({ id: e.id, graph: e.graph, label: e.title })), opts());
+    } else {
+      infer.start({ id: modelId, ...opts() });
+    }
   };
+
+  // output + live stats. Single: from inferStore. Bench: from the selected model's column - its
+  // streamed text is the canonical output and its live counters feed the stat row, so selecting a
+  // row in the table swaps the output/stats to that model (its counters go live while it generates).
+  const owned = bench.compareOwner === modelId;
+  const cur = benchOn && owned ? (bench.columns.find((c) => c.id === detail) ?? bench.columns[0] ?? null) : null;
+  const errored = benchOn ? !!cur?.error : single && infer.status === "error";
+  const errMsg = benchOn ? cur?.error : infer.error;
+  const output = benchOn ? (cur?.text ?? "") : single ? infer.text : "";
+  const tps = benchOn ? (cur?.tokensPerSec ?? null) : single ? infer.tokensPerSec : null;
+  const tokens = benchOn ? (cur?.genTokens ?? 0) : single ? infer.tokens : 0;
+  const prefill = benchOn ? (cur?.prefillMs ?? null) : single ? infer.prefillMs : null;
+  const activeName = benchOn && cur ? titleOf(cur.id) : "";
+  const activeColor = benchOn && cur ? BENCH_COLORS[Math.max(0, entries.findIndex((e) => e.id === cur.id)) % BENCH_COLORS.length] : "var(--ice)";
+
+  return (
+    <section className="grp">
+      <h3>
+        Generate
+        {activeName && (
+          <span className="grp-sub mono" style={{ color: activeColor }}>
+            {activeName}
+          </span>
+        )}
+      </h3>
+      <div className="pan-body">
+        <textarea
+          className={`gen-prompt${expanded ? " tall" : ""}`}
+          placeholder="Enter a prompt…"
+          value={gen.prompt}
+          disabled={running}
+          onChange={(e) => setGenHp({ prompt: e.target.value })}
+        />
+        <GenParams disabled={running} />
+        <span className="btn-wrap" {...tip}>
+          <button type="button" className={`btn ${running ? "danger" : "primary"}`} disabled={!running && !canStart} onClick={onGenerate}>
+            {running ? "Stop" : benchOn ? "Generate & benchmark" : "Generate"}
+          </button>
+        </span>
+        {/* fixed-height output so streaming never pushes the stat row / benchmark down the pane */}
+        <div className={`gen-output mono${expanded ? " tall" : ""}${errored ? " bad" : ""}`}>
+          {errored ? errMsg : output || (running ? "…" : "Output will stream here…")}
+        </div>
+        <div className="stat-row">
+          <Stat label="tok/s" value={tps != null ? tps.toFixed(1) : "—"} />
+          <Stat label="tokens" value={running || tokens > 0 ? `${tokens}/${gen.maxTokens}` : "—"} />
+          <Stat label="prefill" value={prefill != null ? `${prefill.toFixed(0)} ms` : "—"} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// inference benchmark: the toggle, the model picker, the throughput/latency/vram table, and a
+// per-model config + node-profile detail. The prompt and generated output are NOT duplicated here -
+// they're canonical in the Generate section above; a run is started by its "Generate & benchmark".
+function InferenceBenchmark({
+  expanded,
+  open,
+  onToggle,
+  entries,
+  infos,
+  picked,
+  setPicked,
+  detail,
+  onSelect,
+  running,
+}: {
+  expanded: boolean;
+  open: boolean;
+  onToggle: (v: boolean) => void;
+  entries: CompareEntry[];
+  infos: Record<string, CompareInfo>;
+  picked: string[];
+  setPicked: Dispatch<SetStateAction<string[]>>;
+  detail?: string;
+  onSelect: (id: string) => void;
+  running: boolean;
+}) {
+  const modelId = useCanvasStore((s) => s.modelId);
+  const projects = useProjectsStore((s) => s.projects);
+  const bench = useBenchStore();
+  // results isolate to the project that started the run (column 0), like the training benchmark
+  const owned = bench.compareOwner === modelId;
+  const columns = owned ? bench.columns : [];
+  const others = projects.filter((p) => p.id !== modelId);
+  const toggle = (id: string) => setPicked((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= 4 ? s : [...s, id]));
+  // a plain generate for this project also locks the toggle - can't switch modes mid-run
+  const genRunning = useInferStore((s) => s.status === "running" && s.modelId === modelId);
+  const locked = running || genRunning;
 
   return (
     <section className="grp">
@@ -919,7 +998,7 @@ function InferenceBenchmark({ expanded, open, onToggle }: { expanded: boolean; o
           className={`sw${open ? " on" : ""}`}
           aria-checked={open}
           aria-label={open ? "Disable benchmark" : "Enable benchmark"}
-          disabled={running}
+          disabled={locked}
           onClick={() => onToggle(!open)}
         >
           <span className="sw-knob" />
@@ -945,27 +1024,11 @@ function InferenceBenchmark({ expanded, open, onToggle }: { expanded: boolean; o
                 ))}
           </div>
 
-          <textarea
-            className="gen-prompt"
-            placeholder="Prompt for every model…"
-            rows={expanded ? 3 : 2}
-            value={gen.prompt}
-            disabled={running}
-            onChange={(e) => setGenHp({ prompt: e.target.value })}
-          />
-          <GenParams disabled={running} />
-
-          <span className="btn-wrap" {...tip}>
-            <button type="button" className={`btn ${running ? "danger" : "primary"}`} disabled={!running && !canRun} onClick={onRun}>
-              {running ? "Stop" : "Run benchmark"}
-            </button>
-          </span>
-
-          <InferBenchTable entries={entries} columns={columns} detail={detail} onSelect={setDetailId} expanded={expanded} />
+          <InferBenchTable entries={entries} columns={columns} detail={detail} onSelect={onSelect} expanded={expanded} />
 
           <div className="bench-detail">
             <InferDetail
-              info={infos[detail]?.info ?? null}
+              info={infos[detail ?? ""]?.info ?? null}
               column={columns.find((c) => c.id === detail) ?? null}
               graph={entries.find((e) => e.id === detail)?.graph}
               expanded={expanded}
@@ -1050,7 +1113,7 @@ function InferBenchTable({
   );
 }
 
-// detail for the selected model: config, its generated output (varies per model), and decode profile
+// detail for the selected model: config + decode profile (the output lives in the Generate section)
 function InferDetail({
   info,
   column,
@@ -1074,8 +1137,6 @@ function InferDetail({
     return structuralIds(n, e);
   }, [graph]);
 
-  const outText = column?.error ? column.error : column?.text || (column?.running ? "…" : "");
-
   return (
     <div className="bench-block">
       {info ? (
@@ -1090,11 +1151,6 @@ function InferDetail({
       ) : (
         <div className="bench-empty">Compile this model to see its config.</div>
       )}
-
-      <div className="bench-nodes">
-        <span className="bench-sub">Output</span>
-        <div className={`gen-output mono${column?.error ? " bad" : ""}`}>{outText || "Run the benchmark to generate."}</div>
-      </div>
 
       {top.length > 0 && (
         <div className="bench-nodes">

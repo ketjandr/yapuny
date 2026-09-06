@@ -16,13 +16,22 @@ interface InferState {
   modelId: string | null; // the model this run belongs to (output hides when it isn't the open one)
   text: string; // streamed output so far
   tokensPerSec: number | null;
+  tokens: number; // tokens generated so far (the live count)
+  prefillMs: number | null; // prefill latency (time to first token), measured client-side
   error: string | null;
   start: (req: GenerateRequest) => Promise<void>;
   stop: () => void;
   reset: () => void;
 }
 
-const IDLE = { status: "idle" as InferStatus, text: "", tokensPerSec: null as number | null, error: null as string | null };
+const IDLE = {
+  status: "idle" as InferStatus,
+  text: "",
+  tokensPerSec: null as number | null,
+  tokens: 0,
+  prefillMs: null as number | null,
+  error: null as string | null,
+};
 
 let ctrl: AbortController | null = null;
 
@@ -55,12 +64,21 @@ export const useInferStore = create<InferState>((set, get) => ({
 
     const t0 = performance.now();
     let count = 0;
+    let firstAt = 0; // timestamp of the first token, so tok/s measures decode only (excludes prefill)
     try {
       for await (const ev of readSSE(res)) {
         if (ev.event === "token") {
           count += 1;
-          const secs = (performance.now() - t0) / 1000;
-          set((s) => ({ text: s.text + (ev.data.text ?? ""), tokensPerSec: secs > 0 ? count / secs : null }));
+          const now = performance.now();
+          if (count === 1) firstAt = now;
+          // decode rate over the tokens after the first (the first's cost is the prefill/ttft)
+          const secs = (now - firstAt) / 1000;
+          set((s) => ({
+            text: s.text + (ev.data.text ?? ""),
+            tokens: count,
+            prefillMs: s.prefillMs ?? now - t0,
+            tokensPerSec: count > 1 && secs > 0 ? (count - 1) / secs : s.tokensPerSec,
+          }));
         } else if (ev.event === "error") {
           set({ status: "error", error: ev.data.error ?? "generation failed" });
         } else if (ev.event === "done") {
