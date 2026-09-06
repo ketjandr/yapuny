@@ -1,8 +1,8 @@
 // Universal GPU-busy signal. The worker runs one job at a time (training and inference are mutually
 // exclusive), and GET /worker/activity reports what currently holds it: {kind, modelId} or null.
 // Every project reads this to gate its own Train / Generate controls when another project (or another
-// kind of run) is using the GPU. A single poller (started once, ref-counted) keeps it fresh across
-// tabs; the active run also refreshes it immediately on start/stop so the UI doesn't wait a tick.
+// kind of run) is using the GPU.
+//
 import { create } from "zustand";
 import { api } from "@/lib/api";
 
@@ -45,21 +45,27 @@ export function blockingActivity(
   return ownsIt ? null : activity;
 }
 
-// ref-counted global poller so multiple mounts share one interval
-let pollers = 0;
-let timer: ReturnType<typeof setInterval> | null = null;
-export function startActivityPolling(intervalMs = 1500): () => void {
-  pollers += 1;
-  if (timer === null) {
+// Ref-counted activity tracking (shared across mounts): one initial fetch, then a refresh whenever
+// the tab becomes visible / regains focus. No timer - see the note above. Returns a teardown.
+let trackers = 0;
+let onWake: (() => void) | null = null;
+export function startActivityTracking(): () => void {
+  trackers += 1;
+  if (onWake === null) {
     useWorkerStore.getState().refresh();
-    timer = setInterval(() => useWorkerStore.getState().refresh(), intervalMs);
+    onWake = () => {
+      if (document.visibilityState === "visible") useWorkerStore.getState().refresh();
+    };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);
   }
   return () => {
-    pollers -= 1;
-    if (pollers <= 0 && timer !== null) {
-      clearInterval(timer);
-      timer = null;
-      pollers = 0;
+    trackers -= 1;
+    if (trackers <= 0 && onWake) {
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", onWake);
+      onWake = null;
+      trackers = 0;
     }
   };
 }

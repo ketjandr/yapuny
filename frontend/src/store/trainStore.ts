@@ -8,6 +8,7 @@ import { reconnectToBusyRun } from "@/lib/runReconnect";
 import { readSSE } from "@/lib/sse";
 import type { TrainRequest } from "@/lib/types";
 import { toast } from "@/store/toastStore";
+import { useWorkerStore } from "@/store/workerStore";
 
 export type TrainStatus = "idle" | "running" | "stopping" | "completed" | "stopped" | "error";
 
@@ -86,6 +87,7 @@ export const useTrainStore = create<TrainState>((set, get) => {
       if (s.status === "running") return sawFrame ? { status: "completed" } : { ...IDLE, modelId: null };
       return {};
     });
+    useWorkerStore.getState().refresh(); // run ended - the GPU is free, un-gate other controls
   };
 
   return {
@@ -115,8 +117,10 @@ export const useTrainStore = create<TrainState>((set, get) => {
         toast.error(`Couldn't start training: ${detail ?? `${res.status} ${res.statusText}`}`);
         // reflect whatever run (single or bench) is in progress so this tab's Train button disables
         reconnectToBusyRun();
+        useWorkerStore.getState().refresh();
         return;
       }
+      useWorkerStore.getState().refresh(); // this run now holds the GPU - gate other controls
       await consume(res);
     },
 

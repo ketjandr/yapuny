@@ -28,7 +28,7 @@ import { useInferStore } from "@/store/inferStore";
 import { toast } from "@/store/toastStore";
 import { useProjectsStore } from "@/store/projectsStore";
 import { useTrainStore } from "@/store/trainStore";
-import { type Activity, blockingActivity, startActivityPolling, useWorkerStore } from "@/store/workerStore";
+import { type Activity, blockingActivity, startActivityTracking, useWorkerStore } from "@/store/workerStore";
 import { PaneShell } from "./PaneShell";
 
 // one distinct color per benchmarked model (curve line + row/chip swatch), current model first
@@ -120,9 +120,12 @@ export function RightPane() {
   const [expanded, setExpanded] = useState(false);
   const title = mode === "train" ? "Training" : "Inference";
 
-  // keep the universal GPU-busy signal fresh so every project can gate Train / Generate when
-  // another project (or the other kind of run) is occupying the worker
-  useEffect(() => startActivityPolling(), []);
+  // track the universal GPU-busy signal (initial fetch + refresh on tab focus); also refresh on a
+  // project switch so the newly-opened project reflects a run another project may be holding
+  useEffect(() => startActivityTracking(), []);
+  useEffect(() => {
+    useWorkerStore.getState().refresh();
+  }, [modelId]);
 
   // On project switch / reload: reattach to whatever the worker is running so a run (single or
   // bench) survives, other projects can disable their Train, and the bench's selection + curves come

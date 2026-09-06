@@ -8,6 +8,7 @@ import { reconnectToBusyRun } from "@/lib/runReconnect";
 import { readSSE } from "@/lib/sse";
 import type { NodeProfile } from "@/store/benchStore";
 import { toast } from "@/store/toastStore";
+import { useWorkerStore } from "@/store/workerStore";
 
 export type BenchTrainStatus = "idle" | "running" | "stopping" | "completed" | "stopped" | "error";
 
@@ -116,6 +117,7 @@ export const useBenchTrainStore = create<BenchTrainState>((set, get) => {
       if (s.status === "running") return sawFrame ? { status: "completed" } : { ...IDLE_RUN };
       return {};
     });
+    useWorkerStore.getState().refresh(); // run ended - the GPU is free, un-gate other controls
   };
 
   return {
@@ -154,8 +156,10 @@ export const useBenchTrainStore = create<BenchTrainState>((set, get) => {
         // a 409 means the worker is already busy - reattach to that run so this project's Train
         // button greys out on the failed click (same as vanilla training does)
         reconnectToBusyRun();
+        useWorkerStore.getState().refresh();
         return;
       }
+      useWorkerStore.getState().refresh(); // this run now holds the GPU - gate other controls
       await consume(res);
     },
 
