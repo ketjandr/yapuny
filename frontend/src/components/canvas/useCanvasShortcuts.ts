@@ -4,12 +4,20 @@ import { useMemo } from "react";
 import { type Shortcut, useShortcuts } from "@/lib/shortcuts";
 import { useCanvasStore } from "@/store/canvasStore";
 
+// true when the user has selected page text (in the output box, a table, a label, ...) - Cmd+C
+// should then copy that text, not the selected canvas nodes, so leave it to the browser
+function hasTextSelection(): boolean {
+  const sel = window.getSelection();
+  return !!sel && !sel.isCollapsed && sel.toString().trim().length > 0;
+}
+
 export function useCanvasShortcuts(): void {
   const shortcuts = useMemo<Shortcut[]>(
     () => [
       {
         id: "copy",
         keys: "mod+c",
+        when: () => !hasTextSelection(),
         run: () => {
           const s = useCanvasStore.getState();
           const nodeIds = s.nodes.filter((n) => n.selected).map((n) => n.id);
