@@ -57,9 +57,8 @@ class ModelGraphRequest(BaseSchema):
 # -- Data --
 
 
-class PrepareDataRequest(BaseSchema):
-    vocab_size: int = 8000
-    val_fraction: float = 0.1
+class CorpusSaveRequest(BaseSchema):
+    text: str
 
 
 # -- Training --

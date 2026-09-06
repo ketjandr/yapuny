@@ -15,11 +15,13 @@ export const api = {
   deleteModel: (id: string) => fetch(`/api/model/${id}`, { method: "DELETE" }).then(j),
 
   dataStatus: () => fetch("/api/data/status").then(j),
-  prepareData: (body: { vocab_size?: number; val_fraction?: number } = {}) => post("/data/prepare", body).then(j),
   uploadCorpus: (file: File) => {
     const fd = new FormData(); fd.append("file", file);
     return fetch("/api/data/upload", { method: "POST", body: fd }).then(j);
   },
+  getCorpus: () => fetch("/api/data/corpus").then(j),
+  saveCorpus: (text: string) => post("/data/corpus", { text }).then(j),
+  deleteCorpus: () => fetch("/api/data/corpus", { method: "DELETE" }).then(j),
 
   fusionAvailable: () => fetch("/api/fusion/available").then(j),
   quantizationAvailable: () => fetch("/api/quantization/available").then(j),

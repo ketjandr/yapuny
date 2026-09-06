@@ -7,6 +7,7 @@
 // it's locked while a run is in flight. Wired to the worker over SSE (trainStore / benchTrainStore /
 // benchStore). Collapsible + full-view expandable via PaneShell.
 import { useEffect, useMemo, useState } from "react";
+import { CorpusButton } from "@/components/CorpusModal";
 import { useTooltip } from "@/components/tooltipContext";
 import { api } from "@/lib/api";
 import { graphForProject, graphToCanvas } from "@/lib/graph";
@@ -16,6 +17,7 @@ import { useBenchStore } from "@/store/benchStore";
 import { type BenchModel, useBenchTrainStore } from "@/store/benchTrainStore";
 import { N_LAYER_MAX, N_LAYER_MIN, useCanvasStore } from "@/store/canvasStore";
 import { useCompileStore } from "@/store/compileStore";
+import { toast } from "@/store/toastStore";
 import { useProjectsStore } from "@/store/projectsStore";
 import { useTrainStore } from "@/store/trainStore";
 import { PaneShell } from "./PaneShell";
@@ -93,7 +95,13 @@ export function RightPane() {
   }, [modelId, setSelected, clearSelected]);
 
   return (
-    <PaneShell side="right" title={title} expanded={expanded} onToggleExpand={() => setExpanded((v) => !v)}>
+    <PaneShell
+      side="right"
+      title={title}
+      expanded={expanded}
+      onToggleExpand={() => setExpanded((v) => !v)}
+      tools={mode === "train" ? <CorpusButton /> : undefined}
+    >
       <div className="pane-body">
         {mode === "train" ? (
           <TrainControls expanded={expanded} open={benchOpen.train} onToggle={(v) => setBenchOpen("train", v)} />
@@ -342,10 +350,21 @@ function TrainSection({
     learning_rate: Number(lr) || 3e-4,
   });
 
-  const onTrain = () => {
+  const onTrain = async () => {
     if (running) {
       (benchOn ? bench.stop : single.stop)();
       return;
+    }
+    // corpus pre-flight: the worker only errors once the run is spawned, which briefly flips the
+    // button to "Stop" and back (a flicker). Check up front and bail with a toast, no state change.
+    try {
+      const ds = await api.dataStatus();
+      if (!ds?.corpus_uploaded) {
+        toast.error("No corpus - upload one before training");
+        return;
+      }
+    } catch {
+      /* worker unreachable: fall through and let start() surface the failure */
     }
     if (benchOn) bench.start(entries.map((e) => e.id), hp());
     else single.start({ id: modelId, ...hp(), bench: false });

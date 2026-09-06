@@ -11,7 +11,6 @@ from tokenizers import Tokenizer
 from data.tokenizer import (
     decode,
     encode,
-    save_tokenizer,
     train_tokenizer,
 )
 from server.compiler.compiler import GraphCompiler, GraphModule, cache_length
@@ -27,7 +26,6 @@ from worker import store
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 RAW_DIR = DATA_DIR / "raw"
-TOKENIZER_PATH = DATA_DIR / "yapuny_tokenizer.json"
 MAX_CORPUS_BYTES = 10 * 1024 * 1024  # 10 MB cap
 
 
@@ -44,6 +42,14 @@ def _bench_slot(model_id: str, max_steps: int) -> dict:
         "curve": [],  # downsampled [step, loss] history, so a reload keeps the graph
         "bench": None,
     }
+
+
+def _check_corpus_length(train_data: np.ndarray, block_size: int):
+    if len(train_data) < block_size + 1:
+        raise ValueError(
+            f"Corpus too short: {len(train_data)} tokens for a block size of {block_size}. "
+            f"Add more text or lower the block size."
+        )
 
 
 @dataclass
@@ -88,40 +94,6 @@ class Worker:
             "size_bytes": len(content),
             "chars": char_count,
             "lines": line_count,
-        }
-
-    def prepare_data(self, vocab_size: int = 8000, val_fraction: float = 0.1):
-        corpus_path = RAW_DIR / "corpus.txt"
-        if not corpus_path.exists():
-            return {"error": "no corpus uploaded - upload a corpus first"}
-
-        # train tokenizer on corpus
-        tok = train_tokenizer(corpus_path, vocab_size=vocab_size)
-        save_tokenizer(tok, TOKENIZER_PATH)
-
-        # tokenize corpus
-        text = corpus_path.read_text(encoding="utf-8")
-        ids = encode(tok, text)
-
-        # train/val split
-        split_idx = int(len(ids) * (1 - val_fraction))
-        train_ids = ids[:split_idx]
-        val_ids = ids[split_idx:]
-
-        actual_vocab = tok.get_vocab_size()
-        dtype = np.uint16 if actual_vocab < 65536 else np.uint32
-
-        train_arr = np.array(train_ids, dtype=dtype)
-        val_arr = np.array(val_ids, dtype=dtype)
-
-        train_arr.tofile(DATA_DIR / "train.bin")
-        val_arr.tofile(DATA_DIR / "val.bin")
-
-        return {
-            "status": "prepared",
-            "vocab_size": actual_vocab,
-            "train_tokens": len(train_arr),
-            "val_tokens": len(val_arr),
         }
 
     def compile_model(self, model_id: str, graph_data: dict):
@@ -235,6 +207,7 @@ class Worker:
         try:
             # train this model's own tokenizer at its vocab_size, then tokenize the corpus
             tokenizer, train_data, _ = self._tokenize_corpus(model.meta["vocab_size"])
+            _check_corpus_length(train_data, model.meta["block_size"])
             self.train_state["phase"] = "training"
 
             completed, fwd, bwd = self._train_loop(
@@ -311,6 +284,7 @@ class Worker:
                     slot["phase"] = "tokenizing"
                     tok_cache[vocab] = self._tokenize_corpus(vocab)
                 tokenizer, train_data, _ = tok_cache[vocab]
+                _check_corpus_length(train_data, model.meta["block_size"])
                 slot["phase"] = "training"
 
                 if self.device.type == "cuda":

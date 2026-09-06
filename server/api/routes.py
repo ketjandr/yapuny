@@ -10,11 +10,11 @@ from starlette.responses import StreamingResponse
 
 from server.api.schemas import (
     BenchRunRequest,
+    CorpusSaveRequest,
     DecodeRequest,
     GenerateRequest,
     GraphRequest,
     ModelGraphRequest,
-    PrepareDataRequest,
     ProfileRequest,
     TrainBenchRequest,
     TrainRequest,
@@ -132,35 +132,26 @@ def quantization_available():
 
 @router.get("/data/status", tags=["data"])
 def data_status():
-    from worker.worker import DATA_DIR, RAW_DIR, TOKENIZER_PATH
+    from worker.worker import RAW_DIR
 
     corpus_path = RAW_DIR / "corpus.txt"
     has_corpus = corpus_path.exists()
-    has_tokenizer = TOKENIZER_PATH.exists()
-    has_train = (DATA_DIR / "train.bin").exists()
-    has_val = (DATA_DIR / "val.bin").exists()
 
     return {
         "corpus_uploaded": has_corpus,
         "corpus_bytes": corpus_path.stat().st_size if has_corpus else None,
-        "tokenizer_trained": has_tokenizer,
-        "data_prepared": has_train and has_val,
     }
 
 
 @router.delete("/data/corpus", tags=["data"])
 def delete_corpus():
-    from worker.worker import DATA_DIR, RAW_DIR, TOKENIZER_PATH
+    from worker.worker import RAW_DIR
 
     corpus_path = RAW_DIR / "corpus.txt"
     if not corpus_path.exists():
         raise HTTPException(status_code=404, detail="no corpus uploaded")
 
     corpus_path.unlink()
-    for f in [TOKENIZER_PATH, DATA_DIR / "train.bin", DATA_DIR / "val.bin"]:
-        if f.exists():
-            f.unlink()
-
     return {"status": "deleted"}
 
 
@@ -178,16 +169,30 @@ async def upload_corpus(file: UploadFile):
     return result
 
 
-@router.post("/data/prepare", tags=["data"])
-def prepare_data(request: PrepareDataRequest = PrepareDataRequest()):
-    result = worker.prepare_data(
-        vocab_size=request.vocab_size,
-        val_fraction=request.val_fraction,
-    )
+@router.get("/data/corpus", tags=["data"])
+def get_corpus():
+    from worker.worker import RAW_DIR
 
+    corpus_path = RAW_DIR / "corpus.txt"
+    if not corpus_path.exists():
+        raise HTTPException(status_code=404, detail="no corpus uploaded")
+
+    text = corpus_path.read_text(encoding="utf-8", errors="replace")
+    return {
+        "text": text,
+        "size_bytes": corpus_path.stat().st_size,
+        "chars": len(text),
+        "lines": text.count("\n") + 1,
+    }
+
+
+@router.post("/data/corpus", tags=["data"])
+def save_corpus(request: CorpusSaveRequest):
+    # write edited/new corpus text back to disk (autosave target). Reuses the upload path so the
+    # size cap and stats are identical whether text arrives from a file upload or the editor.
+    result = worker.upload_corpus(request.text.encode("utf-8"), "corpus.txt")
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
-
     return result
 
 

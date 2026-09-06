@@ -14,10 +14,11 @@ interface PaneShellProps {
   title?: ReactNode; // header eyebrow; a header renders when a title or the full-view toggle exists
   expanded?: boolean; // controlled full-view state; pair with onToggleExpand to enable full view
   onToggleExpand?: () => void;
+  tools?: ReactNode; // extra header buttons, rendered to the left of the full-view toggle
   children: ReactNode; // body content (each pane defines its own inner layout)
 }
 
-export function PaneShell({ side, title, expanded = false, onToggleExpand, children }: PaneShellProps) {
+export function PaneShell({ side, title, expanded = false, onToggleExpand, tools, children }: PaneShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const collapseTip = useTooltip("Collapse view");
   const expandTip = useTooltip("Expand view");
@@ -42,20 +43,23 @@ export function PaneShell({ side, title, expanded = false, onToggleExpand, child
     );
   }
 
-  const header = (title != null || expandable) && (
+  const header = (title != null || expandable || tools != null) && (
     <div className="pane-head">
       <span className="side-eyebrow pane-title">{title}</span>
-      {expandable && (
+      {(expandable || tools != null) && (
         <div className="pane-tools">
-          <button
-            type="button"
-            className={`pane-icon${expanded ? " close" : ""}`}
-            aria-label={expanded ? "Exit full view" : "Full view"}
-            onClick={() => onToggleExpand?.()}
-            {...fullViewTip}
-          >
-            {expanded ? "✕" : "⤢"}
-          </button>
+          {tools}
+          {expandable && (
+            <button
+              type="button"
+              className={`pane-icon${expanded ? " close" : ""}`}
+              aria-label={expanded ? "Exit full view" : "Full view"}
+              onClick={() => onToggleExpand?.()}
+              {...fullViewTip}
+            >
+              {expanded ? "✕" : "⤢"}
+            </button>
+          )}
         </div>
       )}
     </div>
