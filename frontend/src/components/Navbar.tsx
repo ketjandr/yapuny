@@ -277,7 +277,7 @@ function LocalWorkerHelp({ busy, onConnectLocal }: { busy: boolean; onConnectLoc
       {/* body is a separate flex div: `gap` is unreliable on <details> itself */}
       <div className="wpanel-local-body">
         <p className="wpanel-note">
-          This command installs and starts the worker, using your GPU automatically if you
+          This command installs/updates and starts the worker, using your GPU automatically if you
           have one. Paste it into a terminal:
         </p>
         <div className="wpanel-seg">
