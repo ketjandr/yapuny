@@ -49,6 +49,7 @@ export function Navbar() {
 
 function WorkerConnect() {
   const status = useConnStore((s) => s.status);
+  const mode = useConnStore((s) => s.mode);
   const info = useConnStore((s) => s.info);
   const check = useConnStore((s) => s.check);
   const [open, setOpen] = useState(false);
@@ -81,7 +82,9 @@ function WorkerConnect() {
   const dot = status === "online" ? "" : status === "connecting" ? " warn" : " off";
   const label =
     status === "online"
-      ? `worker: ${info?.gpu || info?.device || "online"}`
+      ? mode === "shared"
+        ? "worker: shared"
+        : `worker: ${info?.gpu || info?.device || "online"}`
       : status === "connecting"
         ? "connecting…"
         : "worker: offline";
@@ -95,31 +98,89 @@ function WorkerConnect() {
       <button className="nl" type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         {status === "online" ? "manage" : "connect"}
       </button>
-      {open && <ConnectPanel onClose={() => setOpen(false)} />}
+      {open && <ConnectPanel />}
     </div>
   );
 }
 
-function ConnectPanel({ onClose }: { onClose: () => void }) {
-  const { url, token, status, error, connect, disconnect } = useConnStore();
+function ConnectPanel() {
+  const { mode, url, token, status, error, info, hasShared, connectCustom, connectShared, disconnect } =
+    useConnStore();
+  const connected = status === "online";
+
+  // connected: read-only view of the active target + Disconnect (no editable fields, no Connect)
+  if (connected) {
+    return (
+      <div className="wpanel">
+        <div className="wpanel-title">{mode === "shared" ? "Shared worker" : "Your worker"}</div>
+        {mode === "shared" ? (
+          <p className="wpanel-note">
+            Free community worker, no setup. Runs on CPU and is <strong>session-only</strong>: your
+            graphs are saved in this browser, but trained weights aren’t kept. Connect your own
+            worker for GPU speed and persistence.
+          </p>
+        ) : (
+          <>
+            <label className="wpanel-field">
+              <span>Worker URL</span>
+              <input type="text" value={url || "local (dev proxy)"} disabled />
+            </label>
+            <label className="wpanel-field">
+              <span>Token</span>
+              <input type="password" value={token} placeholder="none" disabled />
+            </label>
+          </>
+        )}
+        <div className="wpanel-status">
+          <span className="wpanel-ok">✓ connected{info?.device ? ` · ${info.gpu || info.device}` : ""}</span>
+        </div>
+        <div className="wpanel-row">
+          <button type="button" className="btn" onClick={disconnect}>
+            Disconnect
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // disconnected: choose your own worker or opt into the shared worker
+  return <ConnectChooser {...{ url, token, status, error, hasShared, connectCustom, connectShared }} />;
+}
+
+function ConnectChooser({
+  url,
+  token,
+  status,
+  error,
+  hasShared,
+  connectCustom,
+  connectShared,
+}: {
+  url: string;
+  token: string;
+  status: string;
+  error: string | null;
+  hasShared: boolean;
+  connectCustom: (url: string, token: string) => Promise<boolean>;
+  connectShared: () => Promise<boolean>;
+}) {
   const [u, setU] = useState(url);
   const [t, setT] = useState(token);
   const [busy, setBusy] = useState(false);
 
-  const submit = async () => {
+  // on success the panel stays open and re-renders into the connected (Disconnect) view, since
+  // ConnectPanel branches on status === "online" - so we don't close it here
+  const run = async (fn: () => Promise<boolean>) => {
     setBusy(true);
-    const ok = await connect(u, t);
+    await fn();
     setBusy(false);
-    if (ok) onClose();
   };
 
   return (
     <div className="wpanel">
       <div className="wpanel-title">Connect a worker</div>
-      <p className="wpanel-note">
-        Run the worker locally and paste its URL, or point at a remote one. Leave the URL blank in
-        dev to use the built-in proxy.
-      </p>
+      <p className="wpanel-note">Point at your own worker (local or remote), or use the free shared one.</p>
+
       <label className="wpanel-field">
         <span>Worker URL</span>
         <input
@@ -128,9 +189,7 @@ function ConnectPanel({ onClose }: { onClose: () => void }) {
           spellCheck={false}
           value={u}
           onChange={(e) => setU(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-          }}
+          onKeyDown={(e) => e.key === "Enter" && run(() => connectCustom(u, t))}
         />
       </label>
       <label className="wpanel-field">
@@ -141,39 +200,33 @@ function ConnectPanel({ onClose }: { onClose: () => void }) {
           spellCheck={false}
           value={t}
           onChange={(e) => setT(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-          }}
+          onKeyDown={(e) => e.key === "Enter" && run(() => connectCustom(u, t))}
         />
       </label>
-      {/* always reserve a line so the button doesn't jump as the message appears/clears */}
+
       <div className="wpanel-status">
         {status === "error" && error ? (
           <span className="wpanel-err">Couldn't reach worker: {error}</span>
-        ) : status === "online" ? (
-          <span className="wpanel-ok">✓ connected</span>
         ) : status === "connecting" ? (
           <span className="wpanel-muted">connecting…</span>
         ) : null}
       </div>
+
       <div className="wpanel-row">
-        <button type="button" className="btn primary" disabled={busy} onClick={submit}>
+        <button type="button" className="btn primary" disabled={busy} onClick={() => run(() => connectCustom(u, t))}>
           {busy ? "connecting…" : "Connect"}
         </button>
-        {status === "online" && (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              disconnect();
-              setU("");
-              setT("");
-            }}
-          >
-            Disconnect
-          </button>
-        )}
       </div>
+
+      {hasShared && (
+        <>
+          <div className="wpanel-or">or</div>
+          <button type="button" className="wpanel-shared" disabled={busy} onClick={() => run(connectShared)}>
+            Use the free shared worker
+            <span className="wpanel-shared-sub">no setup · CPU · session-only</span>
+          </button>
+        </>
+      )}
     </div>
   );
 }

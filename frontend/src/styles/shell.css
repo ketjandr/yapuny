@@ -185,6 +185,60 @@
   display: flex;
   gap: 8px;
 }
+.wpanel-field input:disabled {
+  color: var(--muted);
+  opacity: 1;
+  cursor: default;
+}
+/* "or" divider between own-worker and shared-worker options */
+.wpanel-or {
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+  position: relative;
+}
+.wpanel-or::before,
+.wpanel-or::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 40%;
+  height: 1px;
+  background: var(--line2);
+}
+.wpanel-or::before {
+  left: 0;
+}
+.wpanel-or::after {
+  right: 0;
+}
+/* shared-worker opt-in button */
+.wpanel-shared {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--line2);
+  background: var(--panel2);
+  color: var(--txt);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.wpanel-shared:hover:not(:disabled) {
+  border-color: var(--ice-dim);
+}
+.wpanel-shared:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.wpanel-shared-sub {
+  font-size: 10.5px;
+  color: var(--faint);
+}
 .nl {
   font-size: 12px;
   letter-spacing: 0.16em;

@@ -1,0 +1,5 @@
+# Caddy in front of the gateway: auto-HTTPS (Let's Encrypt) + streams SSE by default.
+# Replace the hostname with prod domain (must point at the droplet's public IP via an A record).
+shared.example.com {
+	reverse_proxy 127.0.0.1:8080
+}

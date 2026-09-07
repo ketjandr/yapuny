@@ -4,14 +4,14 @@
 import type {
   GraphRequest, ModelGraphRequest, GenerateRequest, TrainRequest, TrainBenchRequest, BenchRunRequest, ProfileRequest,
 } from "./types";
-import { authHeaders, workerUrlFor } from "./workerBase";
+import { requestHeaders, workerUrlFor } from "./workerBase";
 
 const j = (r: Response) => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json(); };
 
-// generic request against the worker base, with the token header attached when set. `path` carries
+// generic request against the worker base, with the session/token header attached. `path` carries
 // its own leading /api (or /health). Callers add method/body/signal via `init`.
 const req = (path: string, init?: RequestInit) =>
-  fetch(workerUrlFor(path), { ...init, headers: { ...authHeaders(), ...(init?.headers ?? {}) } });
+  fetch(workerUrlFor(path), { ...init, headers: { ...requestHeaders(), ...(init?.headers ?? {}) } });
 
 const post = (path: string, body: unknown, signal?: AbortSignal) =>
   req(`/api${path}`, {

@@ -9,6 +9,7 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "python-multipart",
+    "httpx",
 ]
 
 [project.optional-dependencies]
@@ -21,7 +22,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["nodes", "shared", "kernels", "kernels.fusion", "kernels.quantization", "data", "tests", "tests.fusion", "tests.quantization", "server", "server.compiler", "server.api", "server.models", "worker"]
+packages = ["nodes", "shared", "kernels", "kernels.fusion", "kernels.quantization", "data", "tests", "tests.fusion", "tests.quantization", "server", "server.compiler", "server.api", "server.models", "worker", "gateway"]
 
 [tool.ruff]
 line-length = 100

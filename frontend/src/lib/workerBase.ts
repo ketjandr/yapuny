@@ -1,10 +1,22 @@
-// The configured worker target: base URL + optional bearer token. Plain module state backed by
-// localStorage so lib/api can build request URLs synchronously, with no React/store dependency.
-// An empty base means "same origin": in dev the Vite proxy serves /api -> worker (no connect
-// needed); in prod an empty base points at the static host (no worker), so the Connect UI must set
-// one. Trailing slashes are stripped so `${base}/api/...` is always well-formed.
+// The configured worker target: a mode (the user's own worker vs the shared worker) + optional
+// token, persisted to localStorage so lib/api can build request URLs synchronously with no React
+// dependency. A stable per-browser session id is sent on shared requests so the gateway can route
+// each session to its own throwaway worker process.
+const MODE_KEY = "yapuny.worker.mode";
 const URL_KEY = "yapuny.worker.url";
 const TOKEN_KEY = "yapuny.worker.token";
+const SESSION_KEY = "yapuny.session";
+
+export type WorkerMode = "custom" | "shared" | "off"; // "off" = disconnected (url/token remembered)
+
+// the hosted shared worker, baked in at build time (empty in dev unless you set VITE_SHARED_WORKER_URL)
+const SHARED_URL = (import.meta.env.VITE_SHARED_WORKER_URL ?? "").replace(/\/+$/, "");
+export function sharedUrl(): string {
+  return SHARED_URL;
+}
+export function hasShared(): boolean {
+  return SHARED_URL !== "";
+}
 
 function load(key: string): string {
   try {
@@ -13,35 +25,68 @@ function load(key: string): string {
     return "";
   }
 }
+function save(key: string, val: string): void {
+  try {
+    localStorage.setItem(key, val);
+  } catch {
+    /* storage disabled - keep in-memory for this session */
+  }
+}
 
-let workerUrl = load(URL_KEY);
+// default: dev (no shared baked in) -> own worker with an empty url (the Vite proxy); prod -> shared
+const _persisted = load(MODE_KEY);
+let mode: WorkerMode =
+  _persisted === "custom" || _persisted === "shared" || _persisted === "off"
+    ? _persisted
+    : hasShared()
+      ? "shared"
+      : "custom";
+// custom url/token are remembered even when disconnected ("off"), so reconnecting is one click
+let customUrl = load(URL_KEY); // "" = same-origin (dev proxy in dev; nothing in prod)
 let workerToken = load(TOKEN_KEY);
 
+let sessionId = load(SESSION_KEY);
+if (!sessionId) {
+  sessionId = crypto.randomUUID();
+  save(SESSION_KEY, sessionId);
+}
+
+export function getMode(): WorkerMode {
+  return mode;
+}
 export function getWorkerUrl(): string {
-  return workerUrl;
+  return customUrl;
 }
 export function getWorkerToken(): string {
   return workerToken;
 }
 
-export function setWorkerConfig(url: string, token: string): void {
-  workerUrl = url.trim().replace(/\/+$/, "");
+export function setMode(m: WorkerMode): void {
+  mode = m;
+  save(MODE_KEY, m);
+}
+export function setCustom(url: string, token: string): void {
+  customUrl = url.trim().replace(/\/+$/, "");
   workerToken = token.trim();
-  try {
-    localStorage.setItem(URL_KEY, workerUrl);
-    localStorage.setItem(TOKEN_KEY, workerToken);
-  } catch {
-    /* storage disabled - keep the in-memory values for this session */
-  }
+  save(URL_KEY, customUrl);
+  save(TOKEN_KEY, workerToken);
 }
 
-// full request URL for a path (the path carries its own leading /api or /health)
+// the base the requests actually hit: shared url in shared mode, the user's url in custom mode, and
+// nothing when disconnected ("off") - so a disconnected client is offline even though its url is kept
+function base(): string {
+  if (mode === "shared") return SHARED_URL;
+  if (mode === "off") return "";
+  return customUrl;
+}
 export function workerUrlFor(path: string): string {
-  return workerUrl + path;
+  return base() + path;
 }
 
-// Authorization header when a token is set; omitted otherwise so a local worker stays
-// preflight-free (a custom header would force a CORS preflight on every request)
-export function authHeaders(): Record<string, string> {
-  return workerToken ? { authorization: `Bearer ${workerToken}` } : {};
+// Per-request headers: shared mode sends the session id (so the gateway routes it); custom mode
+// sends the bearer token when set. Kept minimal so a token-less custom worker stays preflight-free.
+export function requestHeaders(): Record<string, string> {
+  if (mode === "shared") return { "x-yapuny-session": sessionId };
+  if (mode === "custom" && workerToken) return { authorization: `Bearer ${workerToken}` };
+  return {};
 }
