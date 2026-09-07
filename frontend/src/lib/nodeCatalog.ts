@@ -5,13 +5,42 @@ export type NodeVariant = "req" | "io";
 
 export type NodeCategory = "embedding" | "attention" | "mlp" | "norm" | "head";
 
-// category -> short badge label + full name + accent color (a token name from tokens.css)
-export const CATEGORY: Record<NodeCategory, { label: string; full: string; accent: string }> = {
-  embedding: { label: "EMBED", full: "Embedding", accent: "--steel" },
-  attention: { label: "ATTN", full: "Attention", accent: "--ice" },
-  mlp: { label: "MLP", full: "Multilayer Perceptron", accent: "--amber" },
-  norm: { label: "NORM", full: "Normalization", accent: "--green" },
-  head: { label: "HEAD", full: "Head", accent: "--violet" },
+// category -> short badge label + full name + accent color (a token name from tokens.css) + a brief
+// plain-language help blurb (config-guide style) shown via a HelpDot in the registry
+export const CATEGORY: Record<
+  NodeCategory,
+  { label: string; full: string; accent: string; help: string }
+> = {
+  embedding: {
+    label: "EMBED",
+    full: "Embedding",
+    accent: "--steel",
+    help: "Turns token IDs and their positions into vectors - the model's input layer.",
+  },
+  attention: {
+    label: "ATTN",
+    full: "Attention",
+    accent: "--ice",
+    help: "Lets each token pull in information from other tokens - how the model learns context.",
+  },
+  mlp: {
+    label: "MLP",
+    full: "Multilayer Perceptron",
+    accent: "--amber",
+    help: "A per-token feed-forward step that transforms each position on its own.",
+  },
+  norm: {
+    label: "NORM",
+    full: "Normalization",
+    accent: "--green",
+    help: "Keeps activations at a stable scale and adds residual shortcuts (and dropout) so training stays steady.",
+  },
+  head: {
+    label: "HEAD",
+    full: "Head",
+    accent: "--violet",
+    help: "Projects the final vectors to a score for every possible next token.",
+  },
 };
 
 // which family each backend node type belongs to (drives the accent bar + badge)
@@ -226,7 +255,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
     type: "out_proj",
     label: "Out Projection",
     subtitle: "out = merge(x)·W_o",
-    description: "Merges the heads and projects back to `C`, writing the attention result into the residual stream.",
+    description: "Merges the heads and projects back to `n_embd`, writing the attention result into the residual stream.",
     variant: "req",
     inputs: [p("x", ["H", "T", "hd"])],
     outputs: [p("out", ["T", "C"])],
@@ -259,7 +288,7 @@ export const NODE_CATALOG: Record<string, NodeDef> = {
     type: "dropout",
     label: "Dropout",
     subtitle: "out = drop(x, p)",
-    description: "Randomly zeroes a fraction `p` of activations while training to curb overfitting; no-op at inference.",
+    description: "Randomly zeroes a fraction `p_drop` of activations while training to curb overfitting; no-op at inference.",
     variant: "req",
     inputs: [p("x", ["T", "C"])],
     outputs: [p("out", ["T", "C"])],

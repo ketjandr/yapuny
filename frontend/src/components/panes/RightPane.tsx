@@ -302,7 +302,7 @@ function ConfigSection({ expanded }: { expanded: boolean }) {
           onChange={(v) => setMeta({ n_embd: v })}
         />
         <CfgSlider label="block_size" help="Context window - how many tokens back the model can look when predicting the next. Longer sees more but trains slower." value={meta.block_size} min={16} max={1024} step={16} onChange={(v) => setMeta({ block_size: v })} />
-        <CfgSlider label="dropout" help="Randomly ignores part of the network each step so it can't just memorize the corpus - pushing it to generalize." value={meta.dropout} min={0} max={0.5} step={0.05} float onChange={(v) => setMeta({ dropout: v })} />
+        <CfgSlider label="dropout" help="Randomly ignores this fraction of the network each step to prevent overfitting." value={meta.dropout} min={0} max={0.5} step={0.05} float onChange={(v) => setMeta({ dropout: v })} />
         <CfgSlider label="vocab_size" help="How many distinct tokens (word-pieces) the model knows, learned from your corpus. More captures rarer words but costs more." value={meta.vocab_size} min={256} max={50000} step={256} onChange={(v) => setMeta({ vocab_size: v })} />
       </div>
     </section>

@@ -22,22 +22,10 @@
   gap: 12px;
 }
 .mark {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1.5px solid var(--txt2);
-  position: relative;
-}
-.mark::after {
-  content: "";
-  position: absolute;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--ice);
-  top: -2px;
-  left: calc(50% - 2px);
-  box-shadow: 0 0 6px var(--ice);
+  width: 29px;
+  height: 23px;
+  flex-shrink: 0;
+  display: block;
 }
 .brand-name {
   font-weight: 500;
@@ -475,15 +463,6 @@
   gap: 8px;
   justify-content: space-between;
   align-items: center;
-}
-.tag {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-  border: 1px solid var(--line2);
-  border-radius: 2px;
-  padding: 1px 5px;
 }
 
 /* node palette */

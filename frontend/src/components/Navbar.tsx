@@ -204,20 +204,23 @@ function ConnectChooser({
         />
       </label>
 
-      {/* reserved line above the button so an error/connecting message appears without shifting layout */}
-      <div className="wpanel-status">
-        {status === "error" && error ? (
-          <span className="wpanel-err">Couldn't reach worker: {error}</span>
-        ) : status === "connecting" ? (
-          <span className="wpanel-muted">connecting…</span>
-        ) : null}
-      </div>
-
       <div className="wpanel-row">
         <button type="button" className="btn primary" disabled={busy} onClick={() => run(() => connectCustom(u, t))}>
           {busy ? "connecting…" : "Connect"}
         </button>
       </div>
+
+      {/* only rendered when there's something to say, so the button sits right under the token box and
+          the message just pushes things down when it appears */}
+      {status === "error" && error ? (
+        <div className="wpanel-status">
+          <span className="wpanel-err">Couldn't reach worker: {error}</span>
+        </div>
+      ) : status === "connecting" ? (
+        <div className="wpanel-status">
+          <span className="wpanel-muted">connecting…</span>
+        </div>
+      ) : null}
 
       {/* grouped with the own-worker options above: don't have a worker yet? set one up locally */}
       <LocalWorkerHelp busy={busy} onConnectLocal={() => run(() => connectCustom(LOCAL_URL, ""))} />

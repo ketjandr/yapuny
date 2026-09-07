@@ -1,5 +1,6 @@
 // NodePalette: the Node Registry. Drag any node type onto the canvas, grouped by category.
 import type { CSSProperties } from "react";
+import { HelpDot } from "@/components/HelpDot";
 import { DEFAULT_META } from "@/lib/defaultGraph";
 import {
   CATALOG_ORDER,
@@ -48,9 +49,10 @@ export function NodePalette() {
         const style = { "--accent": `var(${CATEGORY[c].accent})` } as CSSProperties;
         return (
           <section className="grp" key={c} style={style}>
+            {/* name left, help "?" pushed right by the h3's space-between */}
             <h3>
               {CATEGORY[c].full}
-              <span className="tag">{types.length}</span>
+              <HelpDot label={CATEGORY[c].full} text={CATEGORY[c].help} />
             </h3>
             <div className="pal">
               {types.map((t) => {
