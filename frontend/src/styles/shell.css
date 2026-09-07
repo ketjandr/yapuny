@@ -154,7 +154,8 @@
 .wpanel-field input:focus {
   border-color: var(--line3);
 }
-/* fixed status line: always occupies a row so the Connect button never jumps */
+/* status line; min-height reserves a row in the connected panel (rendered unconditionally there) so
+   the "connected" text doesn't jump. In ConnectChooser it's rendered only when there's a message. */
 .wpanel-status {
   min-height: 16px;
   font-size: 11px;

@@ -16,7 +16,11 @@ export function HelpDot({ label, text }: { label: string; text: string }) {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
     const left = Math.max(8, Math.min(r.left, window.innerWidth - POP_MAX_W - 8));
-    setPos({ top: r.bottom + 7, left });
+    // prefer below the button; flip above when the popover would overrun the viewport bottom
+    const popH = popRef.current?.offsetHeight ?? 0;
+    const below = r.bottom + 7;
+    const top = below + popH > window.innerHeight - 8 ? Math.max(8, r.top - popH - 7) : below;
+    setPos({ top, left });
   }, [open]);
 
   useEffect(() => {
@@ -61,7 +65,7 @@ export function HelpDot({ label, text }: { label: string; text: string }) {
             ref={popRef}
             className="help-pop fixed"
             role="tooltip"
-            style={{ top: pos.top, left: pos.left }}
+            style={{ top: pos.top, left: pos.left, maxWidth: POP_MAX_W }}
           >
             {text}
           </span>,

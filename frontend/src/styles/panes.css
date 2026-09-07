@@ -274,7 +274,6 @@
   left: 0;
   z-index: 40;
   width: max-content;
-  max-width: 220px;
   padding: 8px 11px;
   font-family: var(--sans);
   font-size: 12px;
@@ -290,9 +289,11 @@
   opacity: 0.96;
   animation: tt-in 0.09s ease-out;
 }
-/* portaled to <body> so overflow panes can't clip it; top/left set inline from the button rect */
+/* portaled to <body> so overflow panes can't clip it; top/left/max-width set inline from the button
+   rect. z-index beats the full-view overlay (.pane-full, z-index 200) so it isn't hidden there. */
 .help-pop.fixed {
   position: fixed;
+  z-index: 300;
 }
 .cfg-num {
   width: 66px;

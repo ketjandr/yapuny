@@ -212,13 +212,13 @@ function ConnectChooser({
 
       {/* only rendered when there's something to say, so the button sits right under the token box and
           the message just pushes things down when it appears */}
-      {status === "error" && error ? (
+      {(status === "error" && error) || status === "connecting" ? (
         <div className="wpanel-status">
-          <span className="wpanel-err">Couldn't reach worker: {error}</span>
-        </div>
-      ) : status === "connecting" ? (
-        <div className="wpanel-status">
-          <span className="wpanel-muted">connecting…</span>
+          {status === "error" && error ? (
+            <span className="wpanel-err">Couldn't reach worker: {error}</span>
+          ) : (
+            <span className="wpanel-muted">connecting…</span>
+          )}
         </div>
       ) : null}
 
