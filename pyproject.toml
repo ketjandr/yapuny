@@ -32,6 +32,10 @@ dev = [
 [tool.setuptools]
 packages = ["nodes", "shared", "kernels", "kernels.fusion", "kernels.quantization", "data", "tests", "tests.fusion", "tests.quantization", "server", "server.compiler", "server.api", "server.models", "worker", "gateway"]
 
+# ship the default corpus so a fresh worker starts with a usable one (seeded on first run)
+[tool.setuptools.package-data]
+data = ["raw/corpus.txt"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

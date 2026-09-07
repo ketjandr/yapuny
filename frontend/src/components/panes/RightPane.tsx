@@ -25,7 +25,6 @@ import {
 } from "@/store/canvasStore";
 import { useCompileStore } from "@/store/compileStore";
 import { useInferStore } from "@/store/inferStore";
-import { toast } from "@/store/toastStore";
 import { useProjectsStore } from "@/store/projectsStore";
 import { useTrainStore } from "@/store/trainStore";
 import { type Activity, blockingActivity, startActivityTracking, useWorkerStore } from "@/store/workerStore";
@@ -458,17 +457,6 @@ function TrainSection({
     if (running) {
       (benchOn ? bench.stop : single.stop)();
       return;
-    }
-    // corpus pre-flight: the worker only errors once the run is spawned, which briefly flips the
-    // button to "Stop" and back (a flicker). Check up front and bail with a toast, no state change.
-    try {
-      const ds = await api.dataStatus();
-      if (!ds?.corpus_uploaded) {
-        toast.error("No corpus - upload one before training");
-        return;
-      }
-    } catch {
-      /* worker unreachable: fall through and let start() surface the failure */
     }
     if (benchOn) bench.start(entries.map((e) => e.id), hp());
     else single.start({ id: modelId, ...hp(), bench: false });

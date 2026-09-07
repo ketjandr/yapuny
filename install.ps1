@@ -11,7 +11,9 @@ $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 $env:UV_TORCH_BACKEND = "auto"
 
 Write-Host "Installing the Yapuny worker (auto-detecting GPU)..."
-uv tool install --force --python 3.11 "yapuny @ $tarball"
+# --force overwrites the existing tool; --refresh re-fetches the (mutable) main tarball so re-running
+# this line actually pulls the latest code instead of reinstalling a cached build
+uv tool install --force --refresh --python 3.11 "yapuny @ $tarball"
 
 Write-Host ""
 Write-Host "Done. Starting the worker on http://localhost:8000"

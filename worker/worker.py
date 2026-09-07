@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,9 +26,25 @@ from server.compiler.utils import (
 from server.models.graph import GraphSpec
 from worker import store
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# the corpus that ships with the package (always at the package-relative path), used to seed a
+# fresh worker so it starts with a usable corpus
+_PKG_CORPUS = Path(__file__).resolve().parent.parent / "data" / "raw" / "corpus.txt"
+# live data dir: overridable per session (YAPUNY_DATA_DIR) so ephemeral shared workers stay isolated
+DATA_DIR = Path(os.environ.get("YAPUNY_DATA_DIR") or _PKG_CORPUS.parent.parent)
 RAW_DIR = DATA_DIR / "raw"
 MAX_CORPUS_BYTES = 10 * 1024 * 1024  # 10 MB cap
+
+
+def _seed_default_corpus() -> None:
+    # give a data dir with no corpus yet the bundled default (a local install or an ephemeral shared
+    # session). Skipped when the live dir IS the bundled one (default local mode), so an intentional
+    # delete isn't silently restored on restart.
+    corpus = RAW_DIR / "corpus.txt"
+    is_bundled_dir = RAW_DIR.resolve() == _PKG_CORPUS.parent.resolve()
+    if corpus.exists() or not _PKG_CORPUS.exists() or is_bundled_dir:
+        return
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(_PKG_CORPUS, corpus)
 
 
 def _bench_slot(model_id: str, max_steps: int) -> dict:
@@ -66,6 +84,7 @@ class ModelCacheEntry:
 
 class Worker:
     def __init__(self, device: str = "cuda"):
+        _seed_default_corpus()  # a fresh worker starts with the bundled corpus (YAPUNY_DATA_DIR)
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.compiler = GraphCompiler()
         # compiled-model cache (in-memory, per worker), addressed by model id.

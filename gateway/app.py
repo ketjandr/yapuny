@@ -79,7 +79,13 @@ async def _spawn(session_id: str) -> Session:
         raise HTTPException(503, "shared worker is at capacity - try again shortly, or connect your own worker")
     port = _free_port()
     models_dir = tempfile.mkdtemp(prefix="yapuny-sess-")
-    env = {**os.environ, "YAPUNY_MODELS_DIR": models_dir}
+    # per-session data dir (nested so one rmtree cleans it): isolates each session's corpus, and the
+    # worker seeds it with the bundled default corpus on startup
+    env = {
+        **os.environ,
+        "YAPUNY_MODELS_DIR": models_dir,
+        "YAPUNY_DATA_DIR": os.path.join(models_dir, "data"),
+    }
     env.pop("WORKER_TOKEN", None)  # localhost child - the gateway is the trust boundary
     env.pop("FRONTEND_ORIGIN", None)  # server-side calls, no browser CORS
     proc = subprocess.Popen(

@@ -16,7 +16,9 @@ EXTRA=""
 if [ "$(uname -s)" = "Linux" ]; then EXTRA="[gpu]"; fi
 
 echo "Installing the Yapuny worker (auto-detecting GPU)..."
-UV_TORCH_BACKEND=auto uv tool install --force --python 3.11 "yapuny${EXTRA} @ ${REPO_TARBALL}"
+# --force overwrites the existing tool; --refresh re-fetches the (mutable) main tarball so re-running
+# this line actually pulls the latest code instead of reinstalling a cached build
+UV_TORCH_BACKEND=auto uv tool install --force --refresh --python 3.11 "yapuny${EXTRA} @ ${REPO_TARBALL}"
 
 echo ""
 echo "Done. Starting the worker on http://localhost:8000"

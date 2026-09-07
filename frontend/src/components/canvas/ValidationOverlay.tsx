@@ -75,7 +75,7 @@ export function ValidationOverlay() {
 
   return (
     <div className="vpanel">
-      {view.kind === "offline" && <div className="vrow vmuted">validation offline — worker unreachable</div>}
+      {view.kind === "offline" && <div className="vrow vmuted">validation offline</div>}
       {view.kind === "checking" && <div className="vrow vmuted">validating…</div>}
       {view.kind === "ok" && (
         <ValidationBody result={view.result} ids={ids} open={open} onToggle={() => setOpen((o) => !o)} />
