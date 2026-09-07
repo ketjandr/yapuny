@@ -1,8 +1,4 @@
-// The fusion beam visual, shared by the committed edge (FusionEdge) and the drag preview
-// (ConnectionLine): a steady green beam (glow + core) with irregular translucent energy strands
-// flowing source -> target. The flowing gradient is shared (defined once in Canvas defs) and the
-// energy stroke references it via CSS - so nothing per-instance is created and the SMIL flow can
-// never restart (the "frozen for a second on drag" bug). `interactive` adds a hit path.
+// The fusion beam visual, shared by the committed edge (FusionEdge)
 function fusionBeamPath(sx: number, sy: number, tx: number, ty: number): string {
   const dx = tx - sx;
   const bow = Math.min(Math.abs(dx) * 0.4 + 34, 120); // how far the energy dips below the ports

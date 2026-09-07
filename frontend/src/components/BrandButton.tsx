@@ -2,10 +2,6 @@
 // models page so the logo behaves identically everywhere.
 import { useNavigate } from "react-router-dom";
 
-// Logo: three upright rounded square panels fanned in a row, like standing dominoes = a transformer's
-// stacked blocks. Faces stand straight (no skew); a darker rim behind each shows the slab thickness.
-// Front panel brightest -> back darkest for depth (minimalist white/grey, opaque not glassy). Drawn
-// back->front so the front panel sits over the others.
 function BrandMark() {
   const panel = (tx: number, ty: number, face: string, edge: string) => (
     <g key={tx} transform={`translate(${tx} ${ty})`}>

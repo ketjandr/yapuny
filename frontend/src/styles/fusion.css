@@ -1,5 +1,4 @@
-/* Fusion: a bright white-green hot core with green lightning tendrils crackling off it (a
-   Loki-timeline / temporal-branch look), on the beam and circulating each fused node's border. */
+/* Fusion edge styling*/
 
 .fusion-defs {
   position: absolute;
@@ -166,18 +165,9 @@
 .react-flow__edge.fuse-bad .fb-select {
   stroke: var(--red);
 }
-.react-flow__edge.fuse-bad.selected .fb-base {
-  stroke: #ffc2cc;
-  opacity: 0.9;
-}
+.react-flow__edge.fuse-bad.selected .fb-base,
 .react-flow__edge.fuse-bad.selected .fb-haze {
-  stroke: #ffc2cc;
-}
-/* selected + invalid: green goes bright white on select, so mirror that with a bright red
-   (#ffc2cc core + red halo) — same luminance as the green(white) beam, still reads red */
-.react-flow__edge.fuse-bad.selected .fb-select {
-  stroke: #ffc2cc;
-  filter: drop-shadow(0 0 6px var(--red));
+  stroke: var(--red);
 }
 
 .react-flow__node.fuse-bad .yn.fused {

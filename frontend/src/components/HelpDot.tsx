@@ -1,8 +1,4 @@
 // Reusable pressable help affordance: a small "?" button that toggles a persistent popover
-// (click-away or Escape closes it - no hovering needed). Styled to match the app tooltip (.tt).
-// The popover is portaled to <body> with fixed positioning so a scrollable/overflow-clipped pane
-// (e.g. the node registry) can't cut it off - it overlays the canvas instead.
-// Drop <HelpDot label="..." text="..." /> next to any label that needs a plain-language explainer.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 

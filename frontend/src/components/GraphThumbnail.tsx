@@ -1,7 +1,5 @@
 // Static SVG schematic of a project's graph, computed from its persisted canvas (node positions +
-// sizes + category colors + edges). This is far cheaper than mounting a React Flow instance per
-// card and needs no image snapshot/extra storage: it just reads the last-saved canvas and draws
-// rounded rects + edge curves, scaled to fit. Reflects the last-edited state.
+// sizes + category colors + edges).
 import { useMemo } from "react";
 import { deriveBlockNodes } from "@/lib/block";
 import type { YNodeData } from "@/lib/graph";
