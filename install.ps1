@@ -27,7 +27,7 @@ if ($latest -and $latest -eq $current -and (Get-Command yapuny -ErrorAction Sile
 }
 
 if ($current -and $latest) { Write-Host "New worker version available ($short) - updating..." }
-else { Write-Host "Installing the Yapuny worker (auto-detecting GPU)..." }
+else { Write-Host "Installing the Yapuny worker..." }
 
 $env:UV_TORCH_BACKEND = "auto"
 # --force overwrites the existing tool; --refresh re-fetches the (mutable) main tarball

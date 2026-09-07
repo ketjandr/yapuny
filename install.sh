@@ -30,7 +30,7 @@ fi
 if [ -n "$current" ] && [ -n "$latest" ]; then
   echo "New worker version available (${short}) - updating..."
 else
-  echo "Installing the Yapuny worker (auto-detecting GPU)..."
+  echo "Installing the Yapuny worker..."
 fi
 
 # the GPU fusion kernels (triton) only have reliable wheels on Linux; skip that extra on macOS
