@@ -35,6 +35,40 @@ RAW_DIR = DATA_DIR / "raw"
 MAX_CORPUS_BYTES = 10 * 1024 * 1024  # 10 MB cap
 
 
+# Shared-tier compute caps, set per-child by the gateway via env. Unset (self-hosted) = no cap.
+# Model dims are rejected at compile; steps/batch are clamped at train start.
+def _env_int(name: str) -> int | None:
+    v = os.environ.get(name, "").strip()
+    return int(v) if v.isdigit() else None
+
+
+CAP_STEPS = _env_int("YAPUNY_MAX_STEPS")
+CAP_BATCH = _env_int("YAPUNY_MAX_BATCH")
+CAP_N_EMBD = _env_int("YAPUNY_MAX_N_EMBD")
+CAP_BLOCK = _env_int("YAPUNY_MAX_BLOCK")
+CAP_VOCAB = _env_int("YAPUNY_MAX_VOCAB")
+CAP_LAYERS = _env_int("YAPUNY_MAX_LAYERS")
+
+
+def _clamp(v: int, cap: int | None) -> int:
+    return min(v, cap) if cap else v
+
+
+def _check_model_caps(meta) -> None:
+    # raise if any model dimension exceeds a shared-tier cap
+    for cap, val, name in (
+        (CAP_N_EMBD, meta.n_embd, "n_embd"),
+        (CAP_BLOCK, meta.block_size, "block_size"),
+        (CAP_VOCAB, meta.vocab_size, "vocab_size"),
+        (CAP_LAYERS, meta.n_layer, "n_layer"),
+    ):
+        if cap and val > cap:
+            raise ValueError(
+                f"{name}={val} exceeds the shared worker's limit of {cap} - "
+                "connect your own worker for larger models"
+            )
+
+
 def _seed_default_corpus() -> None:
     # give a data dir with no corpus yet the bundled default (a local install or an ephemeral shared
     # session). Skipped when the live dir IS the bundled one (default local mode), so an intentional
@@ -139,6 +173,7 @@ class Worker:
         """Build the runnable model, loading trained weights from the
         locker if the architecture matches, and cache it by id."""
         graph = GraphSpec.from_dict(graph_data)
+        _check_model_caps(graph.meta)  # shared-tier: reject oversized models before building
         full_hash = graph_full_hash(graph)
         struct_hash = graph_structure_hash(graph)
 
@@ -228,6 +263,9 @@ class Worker:
         if not (RAW_DIR / "corpus.txt").exists():
             return _fail("no corpus - upload a corpus first")
 
+        max_steps = _clamp(max_steps, CAP_STEPS)  # shared-tier clamps (no-op when unset)
+        batch_size = _clamp(batch_size, CAP_BATCH)
+
         has_opts, plain_graph, model = self._compile_fresh(entry)
         self.training = True
         self.training_id = model_id
@@ -293,6 +331,9 @@ class Worker:
         if not (RAW_DIR / "corpus.txt").exists():
             _fail("no corpus - upload a corpus first")
             return
+
+        max_steps = _clamp(max_steps, CAP_STEPS)  # shared-tier clamps (no-op when unset)
+        batch_size = _clamp(batch_size, CAP_BATCH)
 
         entries = []
         for mid in model_ids:
