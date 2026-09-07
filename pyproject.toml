@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "yapuny"
 version = "0.1.0"
@@ -11,6 +15,10 @@ dependencies = [
     "python-multipart",
     "httpx",
 ]
+
+# `yapuny` starts the worker (uv tool install exposes it on PATH); see worker/cli.py
+[project.scripts]
+yapuny = "worker.cli:main"
 
 [project.optional-dependencies]
 gpu = [

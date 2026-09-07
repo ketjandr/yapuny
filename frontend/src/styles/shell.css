@@ -143,7 +143,7 @@
 .wpanel-note {
   font-size: 11px;
   line-height: 1.45;
-  color: var(--faint);
+  color: var(--muted);
   margin: 0;
 }
 .wpanel-field {
@@ -237,7 +237,103 @@
 }
 .wpanel-shared-sub {
   font-size: 10.5px;
-  color: var(--faint);
+  color: var(--muted);
+}
+/* collapsible "run locally" guide, grouped under the own-worker connect options */
+.wpanel-local > summary {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+/* the body spacing lives here, not on <details> (gap is unreliable on details itself) */
+.wpanel-local-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+}
+.wpanel-local > summary::-webkit-details-marker {
+  display: none;
+}
+.wpanel-local > summary::before {
+  content: "▸ ";
+  font-size: 14px;
+  color: var(--muted);
+}
+.wpanel-local[open] > summary::before {
+  content: "▾ ";
+}
+/* the guide's own body text needs more contrast than the faint panel notes */
+.wpanel-local .wpanel-note {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.wpanel-local a {
+  color: var(--ice-dim);
+}
+/* GPU/CPU segmented toggle */
+.wpanel-seg {
+  display: flex;
+  gap: 6px;
+}
+.wpanel-seg button {
+  flex: 1;
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line2);
+  background: var(--panel2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.wpanel-seg button.on {
+  border-color: var(--ice-dim);
+  color: var(--txt);
+}
+/* copy-able command box */
+.wpanel-cmd {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  background: var(--panel2);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  padding: 7px 8px;
+}
+.wpanel-cmd code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--txt);
+  overflow-x: auto;
+  white-space: nowrap;
+  /* scrollable but without the native scrollbar chrome */
+  scrollbar-width: none;
+}
+.wpanel-cmd code::-webkit-scrollbar {
+  display: none;
+}
+.wpanel-cmd button {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.wpanel-cmd button:hover {
+  color: var(--txt);
+}
+/* stays green after a copy until the component re-renders (OS switch / panel reopen) */
+.wpanel-cmd button.copied,
+.wpanel-cmd button.copied:hover {
+  color: var(--green);
 }
 .nl {
   font-size: 12px;

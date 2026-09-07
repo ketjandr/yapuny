@@ -204,6 +204,7 @@ function ConnectChooser({
         />
       </label>
 
+      {/* reserved line above the button so an error/connecting message appears without shifting layout */}
       <div className="wpanel-status">
         {status === "error" && error ? (
           <span className="wpanel-err">Couldn't reach worker: {error}</span>
@@ -218,6 +219,9 @@ function ConnectChooser({
         </button>
       </div>
 
+      {/* grouped with the own-worker options above: don't have a worker yet? set one up locally */}
+      <LocalWorkerHelp busy={busy} onConnectLocal={() => run(() => connectCustom(LOCAL_URL, ""))} />
+
       {hasShared && (
         <>
           <div className="wpanel-or">or</div>
@@ -228,5 +232,101 @@ function ConnectChooser({
         </>
       )}
     </div>
+  );
+}
+
+const LOCAL_URL = "http://localhost:8000";
+// one-line installers hosted in the repo; they install uv + the worker and start it (see install.sh)
+const INSTALL_CMD: Record<"unix" | "win", string> = {
+  unix: "curl -LsSf https://raw.githubusercontent.com/ketjandr/yapuny/main/install.sh | sh",
+  win: 'powershell -c "irm https://raw.githubusercontent.com/ketjandr/yapuny/main/install.ps1 | iex"',
+};
+
+// Collapsible "run the worker on your own machine" guide: one copy-paste line (no Docker) that
+// installs and starts the worker, auto-using your GPU if you have one, then a one-click connect.
+function LocalWorkerHelp({ busy, onConnectLocal }: { busy: boolean; onConnectLocal: () => void }) {
+  // default the OS to the visitor's, but let them switch
+  const [os, setOs] = useState<"unix" | "win">(() =>
+    /win/i.test(navigator.userAgent) ? "win" : "unix",
+  );
+  const [copied, setCopied] = useState(false);
+  const cmd = INSTALL_CMD[os];
+
+  // switching OS changes the command, so a prior "copied" no longer applies
+  const pickOs = (next: "unix" | "win") => {
+    setOs(next);
+    setCopied(false);
+  };
+
+  // no auto-reset: the check persists until something re-renders it away (OS switch, panel reopen)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopied(true);
+    } catch {
+      /* clipboard blocked - the command is selectable in the box */
+    }
+  };
+
+  return (
+    <details className="wpanel-local">
+      <summary>Run a worker on your computer</summary>
+      {/* body is a separate flex div: `gap` is unreliable on <details> itself */}
+      <div className="wpanel-local-body">
+        <p className="wpanel-note">
+          This command installs and starts the worker, using your GPU automatically if you
+          have one. Paste it into a terminal:
+        </p>
+        <div className="wpanel-seg">
+          <button type="button" className={os === "unix" ? "on" : ""} onClick={() => pickOs("unix")}>
+            macOS / Linux
+          </button>
+          <button type="button" className={os === "win" ? "on" : ""} onClick={() => pickOs("win")}>
+            Windows
+          </button>
+        </div>
+        <div className="wpanel-cmd">
+          <code>{cmd}</code>
+          <button
+            type="button"
+            className={copied ? "copied" : ""}
+            onClick={copy}
+            aria-label={copied ? "copied" : "copy command"}
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+          </button>
+        </div>
+        <p className="wpanel-note">Then, once it says it's running:</p>
+        <button type="button" className="btn" disabled={busy} onClick={onConnectLocal}>
+          {busy ? "connecting…" : "Connect to localhost:8000"}
+        </button>
+      </div>
+    </details>
+  );
+}
+
+const iconProps = {
+  width: 13,
+  height: 13,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+};
+function CopyIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+function CheckIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
   );
 }
