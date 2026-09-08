@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 try:
+    import torch
+
     from kernels.fusion.fused_dropout_residual import FusedDropoutResidual
     from kernels.fusion.fused_dropout_residual_layernorm import FusedDropoutResidualLayerNorm
     from kernels.fusion.fused_linear_dropout import FusedLinearDropout
@@ -11,7 +13,7 @@ try:
     from kernels.fusion.fused_residual_layernorm import FusedResidualLayerNorm
     from kernels.fusion.fused_scale_mask_softmax import FusedScaleMaskSoftmax
 
-    FUSION_AVAILABLE = True
+    FUSION_AVAILABLE = torch.cuda.is_available()
 except ImportError:
     FUSION_AVAILABLE = False
 

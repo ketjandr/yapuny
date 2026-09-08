@@ -43,7 +43,7 @@ CHILD_CAPS = {
 # hop-by-hop headers not forwarded through a proxy
 HOP = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
-    "trailers", "transfer-encoding", "upgrade", "host", "content-length",
+    "trailers", "transfer-encoding", "upgrade", "host", "content-length", "origin",
 }
 
 

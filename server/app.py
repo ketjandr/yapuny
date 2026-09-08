@@ -7,14 +7,18 @@ from server.api.routes import router
 
 app = FastAPI(title="Yapuny", version="0.1.0")
 
-# CORS: the static frontend (on a CDN) calls this worker directly in prod. Restrict to
-# the frontend origin(s); never "*" with credentials. In dev the Vite proxy avoids CORS
-# entirely, so this only matters for the direct browser->worker prod path.
-# FRONTEND_ORIGIN may be a comma-separated list.
-_origins = os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173")
+# CORS for the direct browser->worker path (a self-hosted worker).
+_origins_env = os.environ.get("FRONTEND_ORIGIN", "").strip()
+if _origins_env:
+    _allow_origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
+    _allow_regex = None
+else:
+    _allow_origins = ["http://localhost:5173", "http://localhost:4173", "https://yapuny.vercel.app"]
+    _allow_regex = r"https://yapuny-[a-z0-9-]+\.vercel\.app"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in _origins.split(",") if o.strip()],
+    allow_origins=_allow_origins,
+    allow_origin_regex=_allow_regex,
     allow_methods=["*"],
     allow_headers=["*"],
 )

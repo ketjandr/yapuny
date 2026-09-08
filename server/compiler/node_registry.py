@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import torch
+
 try:
     from kernels.fusion.flash_attention import FlashAttention
 except ImportError:
@@ -143,7 +145,7 @@ NODE_REGISTRY: dict[str, NodeDef] = {
     ),
 }
 
-if FlashAttention is not None:
+if FlashAttention is not None and torch.cuda.is_available():
     NODE_REGISTRY["flash_attention"] = NodeDef(
         cls=FlashAttention,
         inputs=["q", "k", "v"],

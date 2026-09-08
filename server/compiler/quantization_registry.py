@@ -26,7 +26,7 @@ try:
     from kernels.quantization.quantized_linear_w4 import QuantizedLinearW4
     from kernels.quantization.quantized_linear_w8 import QuantizedLinearW8
 
-    QUANTIZATION_AVAILABLE = True
+    QUANTIZATION_AVAILABLE = torch.cuda.is_available()
 except ImportError:
     QUANTIZATION_AVAILABLE = False
 

@@ -60,6 +60,10 @@ export const useConnStore = create<ConnState>((set) => {
     error: null,
 
     connectCustom: async (url, token) => {
+      if (!url.trim() && import.meta.env.PROD) {
+        set({ status: "error", error: "Enter your worker's URL", info: null });
+        return false;
+      }
       setMode("custom");
       setCustom(url, token);
       set({ mode: "custom", url: getWorkerUrl(), token: getWorkerToken() });
