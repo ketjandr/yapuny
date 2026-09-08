@@ -10,6 +10,7 @@ import { api } from "@/lib/api";
 import { analyzeBlock } from "@/lib/block";
 import { useCanvasStore } from "@/store/canvasStore";
 import { useCompileStore } from "@/store/compileStore";
+import { useConnStore } from "@/store/connStore";
 import { useValidationStore } from "@/store/validationStore";
 import { toast } from "@/store/toastStore";
 
@@ -122,6 +123,7 @@ export function CompileBar() {
   const setCompiling = useCompileStore((s) => s.setCompiling);
   const validating = useValidationStore((s) => s.validating);
   const invalid = useValidationStore((s) => s.view.kind === "ok" && !s.view.result.valid);
+  const online = useConnStore((s) => s.status === "online");
   const modelId = useCanvasStore((s) => s.modelId);
   const toGraph = useCanvasStore((s) => s.toGraph);
   const markCompiled = useCanvasStore((s) => s.markCompiled);
@@ -138,11 +140,12 @@ export function CompileBar() {
 
   const compiled = status === "ready";
   const trainedOk = compiled && trained;
-  // can't compile while a check is in flight (validation or model/status), if the graph or block is
-  // invalid, if already compiled, or mid-compile
-  const disabled = compiling || polling || validating || invalid || blockInvalid || compiled;
-  const title =
-    invalid || blockInvalid
+  // can't compile with no worker connected, while a check is in flight (validation or model/status),
+  // if the graph or block is invalid, if already compiled, or mid-compile
+  const disabled = !online || compiling || polling || validating || invalid || blockInvalid || compiled;
+  const title = !online
+    ? "Connect a worker to compile"
+    : invalid || blockInvalid
       ? "Fix the graph errors before compiling"
       : compiled
         ? "Model is already compiled"

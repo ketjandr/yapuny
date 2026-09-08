@@ -33,13 +33,14 @@ function save(key: string, val: string): void {
   }
 }
 
-// default: dev (no shared baked in) -> own worker with an empty url (the Vite proxy); prod -> shared
+// first load on prod (nothing persisted): don't auto-connect
+// first load on dev will auto-connect via the dev proxy
 const _persisted = load(MODE_KEY);
 let mode: WorkerMode =
   _persisted === "custom" || _persisted === "shared" || _persisted === "off"
     ? _persisted
     : hasShared()
-      ? "shared"
+      ? "off"
       : "custom";
 // custom url/token are remembered even when disconnected ("off"), so reconnecting is one click
 let customUrl = load(URL_KEY); // "" = same-origin (dev proxy in dev; nothing in prod)

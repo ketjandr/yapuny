@@ -77,6 +77,10 @@ export const useConnStore = create<ConnState>((set) => {
     },
 
     check: async () => {
+      if (getMode() === "off") {
+        set({ status: "off", info: null, error: null });
+        return;
+      }
       await verify();
     },
 
