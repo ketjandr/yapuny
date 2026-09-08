@@ -242,7 +242,7 @@ const LOCAL_URL = "http://localhost:8000";
 // one-line installers hosted in the repo; they install uv + the worker and start it (see install.sh)
 const INSTALL_CMD: Record<"unix" | "win", string> = {
   unix: "curl -LsSf https://raw.githubusercontent.com/ketjandr/yapuny/main/install.sh | sh",
-  win: 'powershell -c "irm https://raw.githubusercontent.com/ketjandr/yapuny/main/install.ps1 | iex"',
+  win: "irm https://raw.githubusercontent.com/ketjandr/yapuny/main/install.ps1 | iex",
 };
 
 // Collapsible "run the worker on your own machine" guide: one copy-paste line (no Docker) that
@@ -285,7 +285,7 @@ function LocalWorkerHelp({ busy, onConnectLocal }: { busy: boolean; onConnectLoc
             macOS / Linux
           </button>
           <button type="button" className={os === "win" ? "on" : ""} onClick={() => pickOs("win")}>
-            Windows
+            Windows (PS)
           </button>
         </div>
         <div className="wpanel-cmd">
