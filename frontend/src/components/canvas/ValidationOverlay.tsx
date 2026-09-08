@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import type { YNodeData } from "@/lib/graph";
 import { humanizeMessage, structuralIds } from "@/lib/structuralId";
 import { useCanvasStore } from "@/store/canvasStore";
+import { useConnStore } from "@/store/connStore";
 import { type ValidationResult, useValidationStore } from "@/store/validationStore";
 
 const DEBOUNCE_MS = 400;
@@ -27,6 +28,7 @@ export function ValidationOverlay() {
   const view = useValidationStore((s) => s.view);
   const setView = useValidationStore((s) => s.setView);
   const setValidating = useValidationStore((s) => s.setValidating);
+  const online = useConnStore((s) => s.status === "online");
 
   // collapse state kept in the parent so it survives ValidationBody unmount/remount across checks
   const [open, setOpen] = useState(true);
@@ -68,7 +70,7 @@ export function ValidationOverlay() {
       clearTimeout(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig]);
+  }, [sig, online]);
 
   // structural (readable) id per node, so backend messages read in canvas terms
   const ids = useMemo(() => structuralIds(nodes, edges), [nodes, edges]);
