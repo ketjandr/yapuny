@@ -4,6 +4,8 @@ Visual GPT builder. Design transformer architectures as node graphs, compile the
 
 The frontend is a React canvas where you wire up transformer components (embeddings, attention, MLP, normalization, etc.) into a dataflow graph. The backend compiles the graph into a runnable PyTorch model, handles training (with live SSE loss streaming), tokenization, inference with/without KV-cache, and optional Triton-based operator fusion and weight quantization.
 
+**Try it out: https://yapuny.vercel.app**
+
 ## Architecture
 
 ```
@@ -19,6 +21,7 @@ gateway (FastAPI reverse proxy)      <-- shared tier: one worker subprocess per 
 ```
 
 **Self-hosted path**: browser talks directly to a local or remote worker over CORS.
+
 **Shared path**: browser talks to a gateway that spawns an isolated throwaway worker per `X-Yapuny-Session` header, idle-reaped after 10 min.
 
 ## Graph compiler
