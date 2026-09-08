@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- brand mark: three fanned rounded panels (front brightest -> back darkest) on a dark rounded
+       tile so it reads on any tab bar -->
+  <rect width="32" height="32" rx="7" fill="#0e1119"/>
+  <rect x="4" y="5" width="13" height="13" rx="3" fill="#8b93a3"/>
+  <rect x="9.5" y="8" width="13" height="13" rx="3" fill="#c3c9d4"/>
+  <rect x="15" y="11" width="13" height="13" rx="3" fill="#eef1f6"/>
+</svg>
